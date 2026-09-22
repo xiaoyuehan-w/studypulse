@@ -1,0 +1,276 @@
+import 'package:flutter/material.dart';
+import '../services/github_service.dart';
+import '../services/storage_service.dart';
+import '../services/notification_service.dart';
+
+/// 设置页：配置 GitHub 访问、推送时间、测试通知
+class SettingsScreen extends StatefulWidget {
+  final GitHubService github;
+  final StorageService storage;
+  final NotificationService notifications;
+  final VoidCallback? onConfigured;
+
+  const SettingsScreen({
+    super.key,
+    required this.github,
+    required this.storage,
+    required this.notifications,
+    this.onConfigured,
+  });
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  late TextEditingController _tokenController;
+  late TextEditingController _ownerController;
+  late TextEditingController _repoController;
+  bool _tokenVisible = false;
+  bool _validating = false;
+  String? _validateResult;
+
+  @override
+  void initState() {
+    super.initState();
+    _tokenController = TextEditingController(text: widget.storage.token);
+    _ownerController = TextEditingController(text: widget.storage.owner);
+    _repoController = TextEditingController(text: widget.storage.repo);
+  }
+
+  @override
+  void dispose() {
+    _tokenController.dispose();
+    _ownerController.dispose();
+    _repoController.dispose();
+    super.dispose();
+  }
+
+  /// 保存 GitHub 配置
+  Future<void> _saveConfig() async {
+    widget.github.token = _tokenController.text.trim();
+    widget.github.owner = _ownerController.text.trim();
+    widget.github.repo = _repoController.text.trim();
+
+    await widget.storage.setToken(_tokenController.text.trim());
+    await widget.storage.setOwner(_ownerController.text.trim());
+    await widget.storage.setRepo(_repoController.text.trim());
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('配置已保存')),
+      );
+      widget.onConfigured?.call();
+    }
+  }
+
+  /// 验证 Token
+  Future<void> _validateToken() async {
+    await _saveConfig();
+    setState(() {
+      _validating = true;
+      _validateResult = null;
+    });
+
+    final ok = await widget.github.validateToken();
+    setState(() {
+      _validating = false;
+      _validateResult = ok ? '✅ Token 有效，可以访问仓库' : '❌ Token 无效或无法访问仓库，请检查';
+    });
+  }
+
+  /// 选择推送时间
+  Future<void> _pickPushTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: widget.storage.pushHour, minute: widget.storage.pushMinute),
+    );
+    if (picked != null) {
+      await widget.storage.setPushTime(picked.hour, picked.minute);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('推送时间已设为 ${picked.format(context)}')),
+        );
+      }
+    }
+  }
+
+  /// 发送测试通知
+  Future<void> _sendTestNotification() async {
+    await widget.notifications.requestPermission();
+    await widget.notifications.sendTestNotification();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('测试通知已发送，请查看通知栏')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('设置')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // === GitHub 配置 ===
+          const Text('🔗 GitHub 配置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: _tokenController,
+                    obscureText: !_tokenVisible,
+                    decoration: InputDecoration(
+                      labelText: 'Personal Access Token',
+                      hintText: 'ghp_ 开头的一串字符',
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        icon: Icon(_tokenVisible ? Icons.visibility_off : Icons.visibility),
+                        onPressed: () => setState(() => _tokenVisible = !_tokenVisible),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _ownerController,
+                          decoration: const InputDecoration(
+                            labelText: '用户名',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: _repoController,
+                          decoration: const InputDecoration(
+                            labelText: '仓库名',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _validating ? null : _validateToken,
+                          icon: _validating
+                              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.check_circle),
+                          label: const Text('保存并验证'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_validateResult != null) ...[
+                    const SizedBox(height: 8),
+                    Text(_validateResult!, style: const TextStyle(fontSize: 13)),
+                  ],
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (_) => AlertDialog(
+                          title: const Text('如何创建 Token'),
+                          content: const Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('1. 打开 github.com/settings/tokens'),
+                              Text('2. Generate new token (classic)'),
+                              Text('3. Note 填：StudyPulse'),
+                              Text('4. Expiration 选：No expiration'),
+                              Text('5. 勾选 ☑️ repo'),
+                              Text('6. 生成后复制 ghp_ 开头的字符'),
+                            ],
+                          ),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(context), child: const Text('知道了')),
+                          ],
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.help_outline, size: 18),
+                    label: const Text('如何创建 Token？', style: TextStyle(fontSize: 13)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // === 推送设置 ===
+          const Text('🔔 推送设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.access_time),
+                  title: const Text('每日推送时间'),
+                  subtitle: Text('${widget.storage.pushHour.toString().padLeft(2, '0')}:${widget.storage.pushMinute.toString().padLeft(2, '0')}'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: _pickPushTime,
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.notification_add),
+                  title: const Text('发送测试通知'),
+                  subtitle: const Text('验证推送功能是否正常'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: _sendTestNotification,
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // === 数据管理 ===
+          const Text('📦 数据管理', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.delete_sweep),
+                  title: const Text('清除本地缓存'),
+                  subtitle: const Text('删除缓存的周计划，下次同步重新下载'),
+                  onTap: () async {
+                    await widget.storage.clearCache();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('缓存已清除')),
+                      );
+                    }
+                  },
+                ),
+                const Divider(height: 1),
+                const ListTile(
+                  leading: Icon(Icons.info_outline),
+                  title: Text('StudyPulse v1.0.0'),
+                  subtitle: Text('你的 Obsidian 学习系统的安卓窗口'),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 32),
+        ],
+      ),
+    );
+  }
+}

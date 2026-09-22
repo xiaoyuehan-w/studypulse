@@ -1,0 +1,39 @@
+name: studypulse
+description: StudyPulse - 你的 Obsidian 学习系统的安卓窗口，每日计划推送 + 周计划查看
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  # 网络请求（GitHub API）
+  http: ^1.2.0
+  # 本地通知（每日推送）
+  flutter_local_notifications: ^17.2.2
+  # 时区（通知定时需要）
+  timezone: ^0.9.4
+  flutter_timezone: ^3.0.1
+  # 本地键值存储（Token、设置）
+  shared_preferences: ^2.2.3
+  # 本地文件路径
+  path_provider: ^2.1.3
+  # 日期格式化
+  intl: ^0.19.0
+  # Markdown 渲染
+  flutter_markdown: ^0.7.1
+  # 打开外部链接
+  url_launcher: ^6.2.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
