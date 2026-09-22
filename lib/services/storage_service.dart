@@ -28,10 +28,10 @@ class StorageService {
   String get token => _prefs.getString(_keyToken) ?? '';
   Future<void> setToken(String v) => _prefs.setString(_keyToken, v);
 
-  String get owner => _prefs.getString(_keyOwner) ?? 'xiaoyuehan-w';
+  String get owner => _prefs.getString(_keyOwner) ?? '';
   Future<void> setOwner(String v) => _prefs.setString(_keyOwner, v);
 
-  String get repo => _prefs.getString(_keyRepo) ?? 'learning-system';
+  String get repo => _prefs.getString(_keyRepo) ?? '';
   Future<void> setRepo(String v) => _prefs.setString(_keyRepo, v);
 
   // === 推送时间设置 ===

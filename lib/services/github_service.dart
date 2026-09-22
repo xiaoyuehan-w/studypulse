@@ -13,8 +13,8 @@ class GitHubService {
   static const String _baseUrl = 'https://api.github.com';
 
   GitHubService({
-    this.owner = 'xiaoyuehan-w',
-    this.repo = 'learning-system',
+    this.owner = '',
+    this.repo = '',
     this.token = '',
   });
 
