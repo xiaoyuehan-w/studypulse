@@ -27,6 +27,7 @@ class _HomeScreenState extends State<HomeScreen> {
   WeeklyPlan? _plan;
   bool _loading = false;
   String? _error;
+  Set<String> _completed = {};
 
   static const List<String> _weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
@@ -36,8 +37,32 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadPlan();
   }
 
+  /// 今日日期键（yyyy-MM-dd），跨天自动切换
+  String get _todayDateKey => DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+  /// 加载今日完成状态
+  void _loadCompletionState() {
+    final completed = widget.storage.getCompletedTasks(_todayDateKey);
+    if (mounted) setState(() => _completed = completed);
+  }
+
+  /// 切换任务完成状态并持久化
+  Future<void> _toggleTask(String taskKey) async {
+    final willComplete = !_completed.contains(taskKey);
+    setState(() {
+      if (willComplete) {
+        _completed.add(taskKey);
+      } else {
+        _completed.remove(taskKey);
+      }
+    });
+    await widget.storage.setTaskCompleted(_todayDateKey, taskKey, willComplete);
+  }
+
   /// 加载周计划：优先从 GitHub 拉取，失败则用本地缓存
   Future<void> _loadPlan() async {
+    _loadCompletionState(); // 同步刷新完成状态（跨天时读取新日期）
+
     if (!widget.github.isConfigured) {
       // 未配置 Token，尝试读缓存
       final cached = await widget.storage.getCachedWeeklyPlan();
@@ -236,18 +261,41 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       children: todayTask.subjects.entries
           .where((e) => e.value.trim().isNotEmpty && e.value.trim() != '不动' && e.value.trim() != '—')
-          .map((e) => Card(
-                child: ListTile(
-                  leading: _subjectIcon(e.key),
-                  title: Text(e.key, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(e.value, style: const TextStyle(fontSize: 14, height: 1.4)),
-                  ),
-                  isThreeLine: true,
+          .map((e) {
+        final taskKey = '${e.key}|${e.value}';
+        final done = _completed.contains(taskKey);
+        return Card(
+          child: ListTile(
+            onTap: () => _toggleTask(taskKey),
+            leading: _subjectIcon(e.key),
+            title: Text(
+              e.key,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                decoration: done ? TextDecoration.lineThrough : null,
+                color: done ? Colors.grey : null,
+              ),
+            ),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                e.value,
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 1.4,
+                  decoration: done ? TextDecoration.lineThrough : null,
+                  color: done ? Colors.grey : null,
                 ),
-              ))
-          .toList(),
+              ),
+            ),
+            isThreeLine: true,
+            trailing: Icon(
+              done ? Icons.check_circle : Icons.radio_button_unchecked,
+              color: done ? Colors.green : Colors.grey[400],
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -271,6 +319,6 @@ class _HomeScreenState extends State<HomeScreen> {
       icon = Icons.assignment;
       color = Colors.grey;
     }
-    return CircleAvatar(backgroundColor: color.withOpacity(0.15), child: Icon(icon, color: color));
+    return CircleAvatar(backgroundColor: color.withValues(alpha: 0.15), child: Icon(icon, color: color));
   }
 }
