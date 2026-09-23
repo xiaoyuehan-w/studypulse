@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/github_service.dart';
 import '../services/storage_service.dart';
 import '../services/notification_service.dart';
+import '../services/timer_service.dart';
 
 /// 设置页：配置 GitHub 访问、推送时间、测试通知
 class SettingsScreen extends StatefulWidget {
@@ -29,6 +30,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _tokenVisible = false;
   bool _validating = false;
   String? _validateResult;
+  String _batteryStatus = '检查中…';
 
   @override
   void initState() {
@@ -36,6 +38,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _tokenController = TextEditingController(text: widget.storage.token);
     _ownerController = TextEditingController(text: widget.storage.owner);
     _repoController = TextEditingController(text: widget.storage.repo);
+    _refreshBatteryStatus();
+  }
+
+  /// 查询电池优化白名单状态
+  Future<void> _refreshBatteryStatus() async {
+    final ignoring = await TimerService.isIgnoringBatteryOptimizations();
+    if (!mounted) return;
+    setState(() => _batteryStatus =
+        ignoring ? '已加入白名单 ✅' : '未加入，计时通知可能被系统杀掉');
+  }
+
+  /// 请求加入电池优化白名单（跳系统设置页）
+  Future<void> _requestBatteryWhitelist() async {
+    await TimerService.requestIgnoreBatteryOptimization();
+    await Future.delayed(const Duration(seconds: 1));
+    await _refreshBatteryStatus();
   }
 
   @override
@@ -239,6 +257,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 24),
 
+          // === 学习计时 ===
+          const Text('⏱ 学习计时', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.battery_saver),
+                  title: const Text('后台运行白名单'),
+                  subtitle: Text(_batteryStatus),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: _requestBatteryWhitelist,
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Text(
+                    '小米 / 华为等系统的一键省电会杀掉计时通知。加入白名单后计时更稳定；即使被系统杀掉，重新打开 App 也会自动恢复计时（时长不丢）。',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
           // === 数据管理 ===
           const Text('📦 数据管理', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
@@ -250,12 +294,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: const Text('清除本地缓存'),
                   subtitle: const Text('删除缓存的周计划，下次同步重新下载'),
                   onTap: () async {
+                    final messenger = ScaffoldMessenger.of(context);
                     await widget.storage.clearCache();
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('缓存已清除')),
-                      );
-                    }
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('缓存已清除')),
+                    );
                   },
                 ),
                 const Divider(height: 1),

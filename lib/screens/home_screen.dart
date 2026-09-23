@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/weekly_plan.dart';
 import '../services/github_service.dart';
 import '../services/storage_service.dart';
 import '../services/notification_service.dart';
+import '../services/timer_service.dart';
 import 'settings_screen.dart';
 
 /// 首页：今日学习任务
@@ -29,21 +32,211 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   Set<String> _completed = {};
 
+  /// 进行中的学习会话 {subject, start_ts}
+  Map<String, dynamic>? _currentSession;
+
+  /// 今日各科目已学分钟（供卡片展示；PR-3 打卡统计直接复用底层数据）
+  Map<String, int> _dailyMinutes = {};
+
+  /// 刷新"已学 X 分钟"显示的定时器
+  Timer? _ticker;
+
   static const List<String> _weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
   @override
   void initState() {
     super.initState();
+    _restoreSession();
     _loadPlan();
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
   }
 
   /// 今日日期键（yyyy-MM-dd），跨天自动切换
   String get _todayDateKey => DateFormat('yyyy-MM-dd').format(DateTime.now());
 
-  /// 加载今日完成状态
-  void _loadCompletionState() {
+  /// 恢复未结束的计时（杀进程/重启手机后仍能续上，时长基于时间戳）
+  Future<void> _restoreSession() async {
+    final session = widget.storage.getCurrentSession();
+    if (session == null) return;
+    final subject = session['subject'] as String? ?? '';
+    final startMs = (session['start_ts'] as num?)?.toInt() ?? 0;
+    if (subject.isEmpty || startMs <= 0) return;
+
+    setState(() => _currentSession = session);
+    _startTicker();
+    // 确保前台服务在跑（被系统杀掉时重启通知栏计时）
+    await TimerService.start(
+        subject, DateTime.fromMillisecondsSinceEpoch(startMs));
+  }
+
+  /// 计时显示刷新（半分钟一次即可满足分钟级精度，省电）
+  void _startTicker() {
+    _ticker?.cancel();
+    _ticker = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted && _currentSession != null) setState(() {});
+    });
+  }
+
+  /// 本次计时已进行的分钟数
+  int _elapsedMinutes() {
+    final session = _currentSession;
+    if (session == null) return 0;
+    final startMs = (session['start_ts'] as num?)?.toInt() ?? 0;
+    return DateTime.now()
+        .difference(DateTime.fromMillisecondsSinceEpoch(startMs))
+        .inMinutes;
+  }
+
+  /// 开始学习某科目
+  Future<void> _startStudy(String subject) async {
+    final now = DateTime.now();
+    await widget.storage.startSession(subject, now);
+    final serviceOk = await TimerService.start(subject, now);
+    if (!mounted) return;
+    setState(() {
+      _currentSession = {
+        'subject': subject,
+        'start_ts': now.millisecondsSinceEpoch,
+      };
+    });
+    _startTicker();
+    if (!serviceOk) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('计时已开始（通知栏服务启动失败，请检查通知权限）'),
+      ));
+    }
+  }
+
+  /// 结束学习并记录时长
+  Future<void> _stopStudy() async {
+    final session = _currentSession;
+    if (session == null) return;
+    final subject = session['subject'] as String? ?? '';
+    final startMs = (session['start_ts'] as num?)?.toInt() ?? 0;
+    final start = DateTime.fromMillisecondsSinceEpoch(startMs);
+    final end = DateTime.now();
+    final minutes = end.difference(start).inMinutes;
+
+    await widget.storage.addCompletedSession(_todayDateKey, subject, start, end);
+    await widget.storage.clearCurrentSession();
+    await TimerService.stop();
+    _ticker?.cancel();
+
+    if (!mounted) return;
+    setState(() {
+      _currentSession = null;
+      _dailyMinutes = widget.storage.getDailyMinutes(_todayDateKey);
+    });
+
+    // 非阻塞提示：10 秒自动消失，无操作按钮；调整入口在科目卡片上
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('已记录：$subject $minutes 分钟'),
+      duration: const Duration(seconds: 10),
+    ));
+  }
+
+  /// 打开调整面板（用户主动点击卡片时长区才进入，非阻塞设计）
+  Future<void> _openAdjustSheet(String subject) async {
+    final original = _dailyMinutes[subject] ?? 0;
+    var current = original;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '调整「$subject」今日时长',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '当前 $original 分钟 · 忘记按结束时在此修正',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  _stepButton('−5', current >= 5 ? () => setSheetState(() => current -= 5) : null),
+                  _stepButton('−1', current >= 1 ? () => setSheetState(() => current -= 1) : null),
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        '$current 分钟',
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                  _stepButton('+1', () => setSheetState(() => current += 1)),
+                  _stepButton('+5', () => setSheetState(() => current += 5)),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('取消'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () async {
+                        final delta = current - original;
+                        if (delta != 0) {
+                          await widget.storage.adjustDailyTotalMinutes(
+                              _todayDateKey, subject, delta);
+                        }
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (!mounted) return;
+                        setState(() => _dailyMinutes =
+                            widget.storage.getDailyMinutes(_todayDateKey));
+                      },
+                      child: const Text('保存'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _stepButton(String label, VoidCallback? onTap) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: OutlinedButton(
+          onPressed: onTap,
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(50, 40),
+            padding: EdgeInsets.zero,
+          ),
+          child: Text(label),
+        ),
+      );
+
+  /// 加载今日完成状态与学习时长
+  void _loadLocalState() {
     final completed = widget.storage.getCompletedTasks(_todayDateKey);
-    if (mounted) setState(() => _completed = completed);
+    final daily = widget.storage.getDailyMinutes(_todayDateKey);
+    if (mounted) {
+      setState(() {
+        _completed = completed;
+        _dailyMinutes = daily;
+      });
+    }
   }
 
   /// 切换任务完成状态并持久化
@@ -61,7 +254,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// 加载周计划：优先从 GitHub 拉取，失败则用本地缓存
   Future<void> _loadPlan() async {
-    _loadCompletionState(); // 同步刷新完成状态（跨天时读取新日期）
+    _loadLocalState(); // 同步刷新完成状态与学习时长（跨天时读取新日期）
 
     if (!widget.github.isConfigured) {
       // 未配置 Token，尝试读缓存
@@ -264,35 +457,105 @@ class _HomeScreenState extends State<HomeScreen> {
           .map((e) {
         final taskKey = '${e.key}|${e.value}';
         final done = _completed.contains(taskKey);
+        final isStudying =
+            (_currentSession?['subject'] as String?) == e.key;
+        final todayMinutes = _dailyMinutes[e.key] ?? 0;
+
         return Card(
-          child: ListTile(
-            onTap: () => _toggleTask(taskKey),
-            leading: _subjectIcon(e.key),
-            title: Text(
-              e.key,
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                decoration: done ? TextDecoration.lineThrough : null,
-                color: done ? Colors.grey : null,
-              ),
-            ),
-            subtitle: Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                e.value,
-                style: TextStyle(
-                  fontSize: 14,
-                  height: 1.4,
-                  decoration: done ? TextDecoration.lineThrough : null,
-                  color: done ? Colors.grey : null,
+          child: Column(
+            children: [
+              ListTile(
+                onTap: () => _toggleTask(taskKey),
+                leading: _subjectIcon(e.key),
+                title: Text(
+                  e.key,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    decoration: done ? TextDecoration.lineThrough : null,
+                    color: done ? Colors.grey : null,
+                  ),
+                ),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    e.value,
+                    style: TextStyle(
+                      fontSize: 14,
+                      height: 1.4,
+                      decoration: done ? TextDecoration.lineThrough : null,
+                      color: done ? Colors.grey : null,
+                    ),
+                  ),
+                ),
+                isThreeLine: true,
+                trailing: Icon(
+                  done ? Icons.check_circle : Icons.radio_button_unchecked,
+                  color: done ? Colors.green : Colors.grey[400],
                 ),
               ),
-            ),
-            isThreeLine: true,
-            trailing: Icon(
-              done ? Icons.check_circle : Icons.radio_button_unchecked,
-              color: done ? Colors.green : Colors.grey[400],
-            ),
+              // 学习计时行
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 8, 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: isStudying
+                          ? Text(
+                              '正在学习 · 已学 ${_elapsedMinutes()} 分钟',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.blue[700],
+                              ),
+                            )
+                          : (todayMinutes > 0
+                              ? InkWell(
+                                  onTap: () => _openAdjustSheet(e.key),
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 8, horizontal: 2),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          '今日已学 $todayMinutes 分钟',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey[700],
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Icon(Icons.edit_outlined,
+                                            size: 13,
+                                            color: Colors.grey[500]),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                              : const SizedBox.shrink()),
+                    ),
+                    if (isStudying)
+                      TextButton.icon(
+                        onPressed: _stopStudy,
+                        icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                        label: const Text('结束学习'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.red[600],
+                        ),
+                      )
+                    else
+                      TextButton.icon(
+                        onPressed: _currentSession == null
+                            ? () => _startStudy(e.key)
+                            : null, // 同时只允许一门科目计时
+                        icon: const Icon(Icons.play_circle_outline, size: 18),
+                        label: const Text('开始学习'),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
         );
       }).toList(),
