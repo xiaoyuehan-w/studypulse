@@ -157,15 +157,31 @@ class StorageService {
     await _prefs.setString(_sessionsKey(dateStr), jsonEncode(day));
   }
 
-  /// 手动调整某科目最近一条会话的时长（分钟）
-  Future<void> updateLatestSessionDuration(
-      String dateStr, String subject, int minutes) async {
+  /// 调整某天某科目的总时长：差值从最后一条会话往前分摊，明细结构不变
+  Future<void> adjustDailyTotalMinutes(
+      String dateStr, String subject, int deltaMinutes) async {
+    if (deltaMinutes == 0) return;
     final day = _readDaySessions(dateStr);
     final list = (day[subject] as List?) ?? <dynamic>[];
     if (list.isEmpty) return;
-    final last = Map<String, dynamic>.from(list.last as Map);
-    last['duration_min'] = minutes;
-    list[list.length - 1] = last;
+
+    var remaining = deltaMinutes;
+    for (var i = list.length - 1; i >= 0 && remaining != 0; i--) {
+      final item = Map<String, dynamic>.from(list[i] as Map);
+      var current = (item['duration_min'] as num?)?.toInt() ?? 0;
+      if (remaining > 0) {
+        current += remaining;
+        remaining = 0;
+      } else if (current + remaining >= 0) {
+        current += remaining;
+        remaining = 0;
+      } else {
+        remaining += current; // 本条减到 0，剩余缺口继续往前扣
+        current = 0;
+      }
+      item['duration_min'] = current;
+      list[i] = item;
+    }
     day[subject] = list;
     await _prefs.setString(_sessionsKey(dateStr), jsonEncode(day));
   }

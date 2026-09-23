@@ -133,53 +133,99 @@ class _HomeScreenState extends State<HomeScreen> {
       _dailyMinutes = widget.storage.getDailyMinutes(_todayDateKey);
     });
 
+    // 非阻塞提示：10 秒自动消失，无操作按钮；调整入口在科目卡片上
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('已记录：$subject $minutes 分钟'),
-      action: SnackBarAction(
-        label: '调整',
-        onPressed: () => _adjustLatest(subject),
-      ),
+      duration: const Duration(seconds: 10),
     ));
   }
 
-  /// 手动调整某科目最近一次的时长（忘记按结束时用）
-  Future<void> _adjustLatest(String subject) async {
-    final controller = TextEditingController();
-    final result = await showDialog<int>(
+  /// 打开调整面板（用户主动点击卡片时长区才进入，非阻塞设计）
+  Future<void> _openAdjustSheet(String subject) async {
+    final original = _dailyMinutes[subject] ?? 0;
+    var current = original;
+
+    await showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('调整「$subject」本次时长'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: '分钟数',
-            suffixText: '分钟',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '调整「$subject」今日时长',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '当前 $original 分钟 · 忘记按结束时在此修正',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  _stepButton('−5', current >= 5 ? () => setSheetState(() => current -= 5) : null),
+                  _stepButton('−1', current >= 1 ? () => setSheetState(() => current -= 1) : null),
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        '$current 分钟',
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                  _stepButton('+1', () => setSheetState(() => current += 1)),
+                  _stepButton('+5', () => setSheetState(() => current += 5)),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('取消'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () async {
+                        final delta = current - original;
+                        if (delta != 0) {
+                          await widget.storage.adjustDailyTotalMinutes(
+                              _todayDateKey, subject, delta);
+                        }
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (!mounted) return;
+                        setState(() => _dailyMinutes =
+                            widget.storage.getDailyMinutes(_todayDateKey));
+                      },
+                      child: const Text('保存'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pop(ctx, int.tryParse(controller.text.trim())),
-            child: const Text('保存'),
-          ),
-        ],
       ),
     );
-    if (result == null || result <= 0) return;
-    await widget.storage
-        .updateLatestSessionDuration(_todayDateKey, subject, result);
-    if (!mounted) return;
-    setState(() => _dailyMinutes = widget.storage.getDailyMinutes(_todayDateKey));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已调整为 $result 分钟')),
-    );
   }
+
+  Widget _stepButton(String label, VoidCallback? onTap) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: OutlinedButton(
+          onPressed: onTap,
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(50, 40),
+            padding: EdgeInsets.zero,
+          ),
+          child: Text(label),
+        ),
+      );
 
   /// 加载今日完成状态与学习时长
   void _loadLocalState() {
@@ -463,11 +509,28 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             )
                           : (todayMinutes > 0
-                              ? Text(
-                                  '今日已学 $todayMinutes 分钟',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey[600],
+                              ? InkWell(
+                                  onTap: () => _openAdjustSheet(e.key),
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 8, horizontal: 2),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          '今日已学 $todayMinutes 分钟',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey[700],
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Icon(Icons.edit_outlined,
+                                            size: 13,
+                                            color: Colors.grey[500]),
+                                      ],
+                                    ),
                                   ),
                                 )
                               : const SizedBox.shrink()),
