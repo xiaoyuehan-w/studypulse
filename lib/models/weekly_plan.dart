@@ -1,5 +1,5 @@
 // 周计划数据模型
-// 对应 vault 中「10 Projects/考研科软/周计划/周计划-第X周-YYYY.M.D.md」的格式（PARA 迁移后路径）
+// 对应 vault 中「10 项目/考研科软/周计划/周计划-第X周-YYYY.M.D.md」的格式（PARA 迁移后路径）
 
 /// 单日任务
 class DailyTask {

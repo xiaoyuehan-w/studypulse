@@ -67,7 +67,7 @@ class GitHubService {
 
   /// 获取周计划目录下所有文件，按文件名中的日期降序排列
   Future<List<RepoFile>> listWeeklyPlans() async {
-    final files = await listDirectory('10 Projects/考研科软/周计划');
+    final files = await listDirectory('10 项目/考研科软/周计划');
     // 文件名格式：周计划-第1周-2026.9.23.md
     // 按日期排序（从文件名提取日期）
     files.sort((a, b) {
@@ -90,7 +90,7 @@ class GitHubService {
 
   /// 获取学习状态文件内容
   Future<String> getLearningStatus() async {
-    return getFileContent('10 Projects/考研科软/学习状态-共同.md');
+    return getFileContent('10 项目/考研科软/学习状态-共同.md');
   }
 
   /// 验证 Token 是否有效（能访问仓库）
