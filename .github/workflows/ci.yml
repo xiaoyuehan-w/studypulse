@@ -1,0 +1,50 @@
+# Flutter CI：PR 自动验证（analyze/test/build）
+# 由来：Issue #37 流程降本（机械验收 CI 化）——ZCode 实施
+#
+# 说明：
+# - 版本 pin 3.47.5（与开发者本地一致，防版本漂移导致"CI 过、本地不过"）
+# - release 构建用 debug 签名 fallback（android/app/build.gradle.kts 已配置）——无需密钥
+# - 产物为 release APK（与用户验收/发布版行为一致；debug 版有行为差异）
+name: Flutter CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    name: analyze + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  build-apk:
+    name: build release APK
+    needs: verify
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - name: Upload APK (验收用)
+        uses: actions/upload-artifact@v4
+        with:
+          name: studypulse-ci-apk-${{ github.run_number }}
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
