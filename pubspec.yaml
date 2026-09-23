@@ -27,6 +27,7 @@ dependencies:
   flutter_markdown: ^0.7.1
   # 打开外部链接
   url_launcher: ^6.2.6
+  flutter_foreground_task: ^11.0.3
 
 dev_dependencies:
   flutter_test:

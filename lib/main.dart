@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'services/storage_service.dart';
 import 'services/github_service.dart';
 import 'services/notification_service.dart';
+import 'services/timer_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/weekly_plan_screen.dart';
 import 'screens/settings_screen.dart';
@@ -22,6 +23,9 @@ void main() async {
   final notifications = NotificationService();
   await notifications.init();
   await notifications.requestPermission();
+
+  // 学习计时前台服务（通知渠道与任务配置）
+  TimerService.init();
 
   runApp(StudyPulseApp(
     storage: storage,
