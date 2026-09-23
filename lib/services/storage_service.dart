@@ -71,4 +71,28 @@ class StorageService {
     final file = File('${dir.path}/$_cachedPlanFileName');
     if (await file.exists()) await file.delete();
   }
+
+  // === 今日任务完成状态 ===
+  // 按日期隔离存储：completed_tasks_2026-09-23 -> ["高数|第3讲", ...]
+  // 跨天自动切换到新 key，历史数据保留（供 V1.2/V1.3 打卡统计使用）
+
+  String _completedKey(String dateStr) => 'completed_tasks_$dateStr';
+
+  /// 获取某天已完成任务的键集合（任务键格式："科目|任务内容"）
+  Set<String> getCompletedTasks(String dateStr) {
+    final list = _prefs.getStringList(_completedKey(dateStr)) ?? const [];
+    return list.toSet();
+  }
+
+  /// 设置某任务的完成状态并持久化
+  Future<void> setTaskCompleted(
+      String dateStr, String taskKey, bool completed) async {
+    final tasks = getCompletedTasks(dateStr);
+    if (completed) {
+      tasks.add(taskKey);
+    } else {
+      tasks.remove(taskKey);
+    }
+    await _prefs.setStringList(_completedKey(dateStr), tasks.toList());
+  }
 }
