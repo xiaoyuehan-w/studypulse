@@ -200,4 +200,27 @@ class StorageService {
     });
     return result;
   }
+
+  /// 某天学习总时长（分钟）= 各科目之和
+  int getDailyTotalMinutes(String dateStr) =>
+      getDailyMinutes(dateStr).values.fold(0, (sum, v) => sum + v);
+
+  /// 本周（周一起始）7 天的总分钟数，键为 yyyy-MM-dd
+  /// [now] 可注入便于单元测试
+  Map<String, int> getWeekDailyTotals({DateTime? now}) {
+    final today = now ?? DateTime.now();
+    final monday = DateTime(today.year, today.month, today.day)
+        .subtract(Duration(days: today.weekday - 1)); // Dart: 周一=1 … 周日=7
+    final result = <String, int>{};
+    for (var i = 0; i < 7; i++) {
+      final day = monday.add(Duration(days: i));
+      final key = _dateKey(day);
+      result[key] = getDailyTotalMinutes(key);
+    }
+    return result;
+  }
+
+  /// 日期键（yyyy-MM-dd），与首页 _todayDateKey 格式一致
+  static String _dateKey(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }

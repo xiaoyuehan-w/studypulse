@@ -5,6 +5,7 @@ import 'services/notification_service.dart';
 import 'services/timer_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/weekly_plan_screen.dart';
+import 'screens/stats_screen.dart';
 import 'screens/settings_screen.dart';
 
 void main() async {
@@ -108,6 +109,9 @@ class _MainScreenState extends State<MainScreen> {
         github: widget.github,
         storage: widget.storage,
       ),
+      StatsScreen(
+        storage: widget.storage,
+      ),
       SettingsScreen(
         github: widget.github,
         storage: widget.storage,
@@ -137,6 +141,11 @@ class _MainScreenState extends State<MainScreen> {
             icon: Icon(Icons.calendar_month_outlined),
             selectedIcon: Icon(Icons.calendar_month),
             label: '本周',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.insights_outlined),
+            selectedIcon: Icon(Icons.insights),
+            label: '统计',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),
