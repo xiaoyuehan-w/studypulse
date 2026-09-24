@@ -2,6 +2,6 @@
 /// 单一事实源是 pubspec.yaml 的 version 字段；脚本会把两者对齐并校验。
 library;
 
-const String appVersion = '1.3.1';
-const String appBuild = '7';
+const String appVersion = '1.3.2';
+const String appBuild = '8';
 const String appVersionFull = '$appVersion+$appBuild';

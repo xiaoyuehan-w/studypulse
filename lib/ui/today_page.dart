@@ -253,11 +253,8 @@ class _TodayPageState extends State<TodayPage> {
     );
   }
 
-  String _elapsed(StudySession s) {
-    final m = s.effectiveMinutes;
-    final sec = DateTime.now().difference(s.startAt).inSeconds % 60;
-    return '${m.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
-  }
+  /// 计时显示：真实秒数、向下取整（从 00:00 开始）
+  String _elapsed(StudySession s) => s.clockLabel;
 
   Widget _footer(AppServices s) {
     return ValueListenableBuilder(

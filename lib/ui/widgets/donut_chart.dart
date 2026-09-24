@@ -102,11 +102,17 @@ class DonutLegend extends StatelessWidget {
   final List<SubjectSlice> slices;
   const DonutLegend({super.key, required this.slices});
 
-  static String hm(int minutes) {
-    final h = minutes ~/ 60;
-    final m = minutes % 60;
-    if (h == 0) return '$m 分';
-    return m == 0 ? '$h 小时' : '$h 小时 $m 分';
+  static String hm(int minutes) => hmFromSeconds(minutes * 60);
+
+  /// 秒 → 人类可读（**统计口径**：不足 1 分钟进位成 1 分；≥1 分钟按分钟向下取整）
+  static String hmFromSeconds(int seconds) {
+    if (seconds <= 0) return '0 分';
+    if (seconds < 60) return '1 分';
+    final m = seconds ~/ 60;
+    if (m < 60) return '$m 分';
+    final h = m ~/ 60;
+    final r = m % 60;
+    return r == 0 ? '$h 小时' : '$h 小时 $r 分';
   }
 
   @override
@@ -123,7 +129,7 @@ class DonutLegend extends StatelessWidget {
                 Container(width: 10, height: 10, decoration: BoxDecoration(color: s.color, shape: BoxShape.circle)),
                 const SizedBox(width: 8),
                 Expanded(child: Text(s.name, style: const TextStyle(fontSize: 13))),
-                Text(hm(s.minutes), style: const TextStyle(fontSize: 13)),
+                Text(hm(s.minutes * 60), style: const TextStyle(fontSize: 13)),
                 const SizedBox(width: 8),
                 SizedBox(
                   width: 44,

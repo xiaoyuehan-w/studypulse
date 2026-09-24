@@ -58,8 +58,16 @@ class StudySession {
     return d < 0 ? 0 : d;
   }
 
-  /// 秒 → 分钟（向上取整，避免"学了 50 秒显示 0 分钟"）
+  /// 秒 → 分钟（向上取整：用于**统计口径**，避免 50 秒被算成 0）
   int get effectiveMinutes => (effectiveSeconds + 59) ~/ 60;
+
+  /// 计时显示用 mm:ss —— **向下取整**，从 00:00 起（修：此前用 effectiveMinutes 会 1 秒变 01:01）
+  String get clockLabel {
+    final sec = effectiveSeconds;
+    final m = sec ~/ 60;
+    final r = sec % 60;
+    return '${m.toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
+  }
 
   /// 展示用时间段：13:48–14:35 / 13:48–进行中
   String get timeRange {
@@ -73,7 +81,7 @@ class StudySession {
     if (isRunning) return '';
     final sec = effectiveSeconds;
     if (sec < 60) return sec <= 0 ? '已完成' : '$sec 秒';
-    final m = effectiveMinutes;
+    final m = sec ~/ 60; // 向下取整：61 秒显示「1 分钟」，不夸大
     if (m < 60) return '$m 分钟';
     final h = m ~/ 60;
     final r = m % 60;
