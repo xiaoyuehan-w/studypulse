@@ -58,6 +58,27 @@ class NotificationService {
     return granted ?? false;
   }
 
+  /// 通知权限是否已授予（只查询，不弹窗）
+  Future<bool> areNotificationsEnabled() async {
+    final android = _notifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    return await android?.areNotificationsEnabled() ?? true;
+  }
+
+  /// 是否允许设精确闹钟（Android 12+ 需用户授予；更低版本恒可用）
+  Future<bool> canScheduleExact() async {
+    final android = _notifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    return await android?.canScheduleExactNotifications() ?? true;
+  }
+
+  /// 跳转系统「闹钟和提醒」授权页（Android 12+；低版本无此页面）
+  Future<void> openExactAlarmSettings() async {
+    final android = _notifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    await android?.requestExactAlarmsPermission();
+  }
+
   /// 根据周计划，设定未来 7 天的每日推送
   /// 每次调用会取消旧的通知并重新设定
   Future<void> scheduleWeeklyNotifications(
@@ -67,6 +88,11 @@ class NotificationService {
   }) async {
     // 取消所有旧通知
     await _notifications.cancelAll();
+
+    // Android 12+ 精确闹钟未授权时降级为非精确：保证调度不硬失败（权限引导在设置页）
+    final scheduleMode = await canScheduleExact()
+        ? AndroidScheduleMode.exactAllowWhileIdle
+        : AndroidScheduleMode.inexactAllowWhileIdle;
 
     final now = DateTime.now();
 
@@ -102,7 +128,7 @@ class NotificationService {
             styleInformation: BigTextStyleInformation(''),
           ),
         ),
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        androidScheduleMode: scheduleMode,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
         payload: 'daily_plan_${task.weekday}',

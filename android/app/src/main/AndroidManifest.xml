@@ -46,6 +46,23 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
+        <!-- 定时通知（flutter_local_notifications 文档要求 App 自己声明，插件不代劳）：
+             ScheduledNotificationReceiver 到点弹通知；
+             ScheduledNotificationBootReceiver 开机/换装后重排闹钟（hub#45 推送根治） -->
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
+
         <!-- 学习计时前台服务（Android 14+ 需声明 specialUse 类型与用途说明） -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
