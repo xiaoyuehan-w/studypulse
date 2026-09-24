@@ -124,6 +124,29 @@ class AppServices {
     sessions.value = store.sessions;
   }
 
+  /// 批量删除（同时清理"完成任务"对应的勾选标记，避免完成率虚高）
+  Future<int> deleteSessions(Iterable<String> ids) async {
+    final idSet = ids.toSet();
+    final all = store.sessions;
+    final removed = all.where((x) => idSet.contains(x.id)).toList();
+    if (removed.isEmpty) return 0;
+    // 1) 删记录
+    all.removeWhere((x) => idSet.contains(x.id));
+    await store.saveSessions(all);
+    // 2) 清勾选标记（任务来源的记录删掉后，完成状态也应取消）
+    for (final x in removed) {
+      if (x.source == SessionSource.task) {
+        await store.setCompleted('${x.dateKey}#${x.subject}', false);
+      }
+    }
+    sessions.value = store.sessions;
+    completed.value = store.completedKeys;
+    return removed.length;
+  }
+
+  /// 最近的计划同步时间（用于"数据新不新"的可见性）
+  DateTime? get lastSync => store.lastSync;
+
   // ---------- 派生数据 ----------
   CompletionStat get weekCompletion => completionOf(
         plan: plan.value,

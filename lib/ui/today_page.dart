@@ -93,9 +93,21 @@ class _TodayPageState extends State<TodayPage> {
             Row(
               children: [
                 Text(
-                  plan == null ? '暂无周计划' : '${plan.weekLabel} · 本周完成 ${c.done}/${c.total}',
+                  plan == null
+                      ? '暂无周计划'
+                      : (c.total == 0
+                          ? '${plan.weekLabel} · 本周完成 —'
+                          : '${plan.weekLabel} · 本周完成 ${c.done}/${c.total}'),
                   style: TextStyle(color: Colors.grey[700]),
                 ),
+                if (s.lastSync != null) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '同步于 ${s.lastSync!.month}.${s.lastSync!.day} '
+                    '${s.lastSync!.hour.toString().padLeft(2, '0')}:${s.lastSync!.minute.toString().padLeft(2, '0')}',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  ),
+                ],
                 const Spacer(),
                 if (s.syncing.value)
                   const SizedBox(
