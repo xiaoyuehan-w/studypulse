@@ -1,109 +1,155 @@
-// 周计划数据模型
-// 对应 vault 中「10 项目/考研科软/周计划/周计划-第X周-YYYY.M.D.md」的格式（PARA 迁移后路径）
+// 周计划数据模型 + 契约解析
+// ⚠️ 数据契约（冻结）：路径 / 文件名 / section 名不可擅改，见 docs/数据契约.md
+//   路径：10 项目/考研科软/周计划/周计划-第N周-YYYY.M.D.md
+//   结构：frontmatter(week) + 「## 本周章节目标」表 + 「## 每日安排」表
+// 纯逻辑（无 IO），可单测。
 
 /// 单日任务
 class DailyTask {
-  final String weekday; // 周几，如 "周三"
-  final String date; // 日期，如 "9.23"
-  final Map<String, String> subjects; // 科目 -> 任务内容（已去除 [[]] 链接）
+  final String weekday; // 「周三」
+  final String date; // 「9.23」
+  final Map<String, String> subjects; // 科目 -> 任务内容（已剥离 [[]]）
 
-  DailyTask({
-    required this.weekday,
-    required this.date,
-    required this.subjects,
-  });
+  DailyTask({required this.weekday, required this.date, required this.subjects});
 
-  /// 获取当天所有任务的可读文本（用于推送通知）
-  String get notificationBody {
-    final parts = subjects.entries
-        .where((e) => e.value.trim().isNotEmpty && e.value.trim() != '不动')
-        .map((e) => '${e.key}：${e.value}')
-        .toList();
-    return parts.join('\n');
+  /// 占位值不算任务
+  static const _placeholders = ['不动', '—', '-', '不学', '无', '休息'];
+
+  static bool isRealTask(String v) {
+    final t = v.trim();
+    if (t.isEmpty) return false;
+    return !_placeholders.contains(t);
   }
 
-  /// 当天是否有实际任务（排除"不动"）
-  bool get hasTasks {
-    return subjects.values.any((v) =>
-        v.trim().isNotEmpty && v.trim() != '不动' && v.trim() != '—');
-  }
+  /// 通知正文：高数：… | 编程：… | 英语：…
+  String get notificationBody => subjects.entries
+      .where((e) => isRealTask(e.value))
+      .map((e) => '${e.key}：${e.value}')
+      .join(' | ');
+
+  bool get hasTasks => subjects.values.any(isRealTask);
+
+  Map<String, dynamic> toJson() => {'weekday': weekday, 'date': date, 'subjects': subjects};
+
+  factory DailyTask.fromJson(Map<String, dynamic> j) => DailyTask(
+        weekday: j['weekday'] as String? ?? '',
+        date: j['date'] as String? ?? '',
+        subjects: (j['subjects'] as Map?)?.map((k, v) => MapEntry('$k', '$v')) ?? {},
+      );
 }
 
-/// 章节目标
+/// 本周章节目标
 class ChapterGoal {
   final String subject;
   final String content;
-
   ChapterGoal({required this.subject, required this.content});
 }
 
-/// 完整周计划
+/// 一周计划（已解析）
 class WeeklyPlan {
-  final String weekLabel; // 如 "第1周"
-  final String dateRange; // 如 "2026.9.23 - 9.29"
+  final String weekLabel;
+  final String dateRange;
   final DateTime? startDate;
   final DateTime? endDate;
-  final List<ChapterGoal> goals; // 本周章节目标
-  final List<DailyTask> dailyTasks; // 每日安排
-  final String rawMarkdown; // 原始 markdown（用于详情页渲染）
-  final String fileName; // 文件名
+  final List<ChapterGoal> goals;
+  final List<DailyTask> dailyTasks;
+  final String rawMarkdown;
+  final String fileName;
 
   WeeklyPlan({
     required this.weekLabel,
     required this.dateRange,
-    this.startDate,
-    this.endDate,
+    required this.startDate,
+    required this.endDate,
     required this.goals,
     required this.dailyTasks,
     required this.rawMarkdown,
     required this.fileName,
   });
 
-  /// 根据 DateTime 获取当天的任务
+  static const List<String> weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
+  /// 取某天的任务：**先按日期精确匹配**（防止"周三→周二"这类跨周计划错配），
+  /// 再退化为按「周几」匹配（仅当该行没有日期、且本计划覆盖这一天时）
   DailyTask? getTaskForDate(DateTime date) {
-    const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    final md = '${date.month}.${date.day}';
+    // ① 日期精确匹配（行里写了日期）
+    for (final t in dailyTasks) {
+      if (t.date.isNotEmpty && t.date == md) return t;
+    }
+    // ② 无日期信息的行：按周几匹配，但必须落在本计划的日期范围内
+    if (!coversDate(date)) return null;
     final wd = weekdays[date.weekday - 1];
-    for (final task in dailyTasks) {
-      if (task.weekday == wd) return task;
+    for (final t in dailyTasks) {
+      if (t.date.isEmpty && t.weekday == wd) return t;
     }
     return null;
   }
 
-  /// 获取今天的任务
+  /// 行对应的具体日期（用于完成率/回归统计）；无法解析返回 null
+  DateTime? dateOfTask(DailyTask t) {
+    final m = RegExp(r'^(\d{1,2})\.(\d{1,2})$').firstMatch(t.date.trim());
+    if (m == null) return null;
+    final year = startDate?.year ?? DateTime.now().year;
+    final month = int.parse(m.group(1)!);
+    final day = int.parse(m.group(2)!);
+    var d = DateTime(year, month, day);
+    // 跨年计划（12月→1月）修正
+    final s0 = startDate;
+    if (s0 != null && d.isBefore(s0.subtract(const Duration(days: 3)))) {
+      d = DateTime(year + 1, month, day);
+    }
+    return d;
+  }
+
+  /// 本计划覆盖的日期序列（按行日期；无日期的行用周几+周起点推算）
+  List<DateTime> get coveredDates {
+    final start = startDate;
+    if (start == null) return const [];
+    final out = <DateTime>[];
+    for (final t in dailyTasks) {
+      final d = dateOfTask(t) ??
+          start.add(Duration(days: weekdays.indexOf(t.weekday).clamp(0, 6)));
+      out.add(DateTime(d.year, d.month, d.day));
+    }
+    return out;
+  }
+
   DailyTask? get todayTask => getTaskForDate(DateTime.now());
 
-  /// 从 markdown 文本解析周计划
-  static WeeklyPlan? parse(String markdown, {String fileName = ''}) {
+  /// 是否覆盖某天（无日期信息时视为覆盖，避免误报）
+  bool coversDate(DateTime date) {
+    final s = startDate, e = endDate;
+    if (s == null || e == null) return true;
+    final d = DateTime(date.year, date.month, date.day);
+    return !d.isBefore(s) && !d.isAfter(e);
+  }
+
+  /// 解析；内容无效返回 null
+  static WeeklyPlan? parse(String markdown, {required String fileName}) {
     if (markdown.trim().isEmpty) return null;
 
     var weekLabel = '';
     var dateRange = '';
-    DateTime? startDate;
-    DateTime? endDate;
-    final goals = <ChapterGoal>[];
-    final dailyTasks = <DailyTask>[];
-
+    DateTime? startDate, endDate;
     final lines = markdown.split('\n');
 
-    // 1. 解析标题行：# 第1周（2026.9.23 - 9.29）
     for (final line in lines) {
       final m = RegExp(r'^#\s+(第\d+周)[（(](.+?)[）)]').firstMatch(line);
       if (m != null) {
         weekLabel = m.group(1)!;
         dateRange = m.group(2)!;
-        // 尝试解析日期
         final dm = RegExp(r'(\d{4})\.(\d{1,2})\.(\d{1,2})\s*[-–]\s*(\d{1,2})\.(\d{1,2})')
             .firstMatch(dateRange);
         if (dm != null) {
-          final year = int.parse(dm.group(1)!);
-          startDate = DateTime(year, int.parse(dm.group(2)!), int.parse(dm.group(3)!));
-          endDate = DateTime(year, int.parse(dm.group(4)!), int.parse(dm.group(5)!));
+          final y = int.parse(dm.group(1)!);
+          startDate = DateTime(y, int.parse(dm.group(2)!), int.parse(dm.group(3)!));
+          endDate = DateTime(y, int.parse(dm.group(4)!), int.parse(dm.group(5)!));
         }
         break;
       }
     }
     if (weekLabel.isEmpty) {
-      //  fallback：从 YAML 的 week 字段
       for (final line in lines) {
         final m = RegExp(r'^week:\s*(.+)').firstMatch(line);
         if (m != null) {
@@ -113,65 +159,52 @@ class WeeklyPlan {
       }
     }
 
-    // 2. 找到各 section 的行号
-    var dailyIdx = -1;
-    var goalIdx = -1;
+    var dailyIdx = -1, goalIdx = -1;
     for (var i = 0; i < lines.length; i++) {
-      if (lines[i].contains('## 每日安排')) dailyIdx = i;
-      if (lines[i].contains('## 本周章节目标')) goalIdx = i;
+      if (lines[i].startsWith('## 每日安排')) dailyIdx = i;
+      if (lines[i].startsWith('## 本周章节目标')) goalIdx = i;
     }
 
-    // 3. 解析本周章节目标表
+    final goals = <ChapterGoal>[];
     if (goalIdx >= 0) {
       for (var i = goalIdx + 1; i < lines.length; i++) {
         final line = lines[i].trim();
         if (line.startsWith('## ')) break;
-        if (line.startsWith('|') && !line.contains('---') && !line.contains('科目')) {
-          final cells = _parseTableRow(line);
-          if (cells.length >= 2) {
-            goals.add(ChapterGoal(subject: cells[0], content: _cleanWikiLinks(cells[1])));
-          }
-        }
+        if (!line.startsWith('|')) continue;
+        final cols = _splitRow(line);
+        if (cols.length < 2 || _isSeparator(cols) || cols[0] == '科目') continue;
+        goals.add(ChapterGoal(subject: cols[0], content: cols[1]));
       }
     }
 
-    // 4. 解析每日安排表
+    final dailyTasks = <DailyTask>[];
     if (dailyIdx >= 0) {
-      List<String>? headers;
+      var subjects = <String>[];
       for (var i = dailyIdx + 1; i < lines.length; i++) {
         final line = lines[i].trim();
         if (line.startsWith('## ')) break;
         if (!line.startsWith('|')) continue;
-        if (line.contains('---')) continue; // 分隔行
-
-        final cells = _parseTableRow(line);
-        if (cells.isEmpty) continue;
-
-        // 第一行是表头
-        if (headers == null) {
-          headers = cells;
+        final cols = _splitRow(line);
+        if (_isSeparator(cols)) continue;
+        if (cols.isNotEmpty && (cols[0] == '日期' || cols[0] == '周几')) {
+          subjects = cols.sublist(1);
           continue;
         }
-
-        // 数据行：第一列是"周几 日期"
-        final firstCol = cells[0].trim();
-        final wdMatch = RegExp(r'(周[一二三四五六日])\s*(\d+\.\d+)?').firstMatch(firstCol);
-        if (wdMatch == null) continue;
-
-        final weekday = wdMatch.group(1)!;
-        final date = wdMatch.group(2) ?? '';
-
-        final subjects = <String, String>{};
-        for (var c = 1; c < headers.length && c < cells.length; c++) {
-          subjects[headers[c].trim()] = _cleanWikiLinks(cells[c]);
+        if (cols.length < 2) continue;
+        final map = <String, String>{};
+        for (var c = 1; c < cols.length; c++) {
+          final key = (c - 1 < subjects.length) ? subjects[c - 1] : '科目$c';
+          map[key] = _stripLinks(cols[c]);
         }
-
-        dailyTasks.add(DailyTask(weekday: weekday, date: date, subjects: subjects));
+        final (wd, dt) = _splitWeekdayDate(cols[0]);
+        dailyTasks.add(DailyTask(weekday: wd, date: dt, subjects: map));
       }
     }
 
+    if (weekLabel.isEmpty && goals.isEmpty && dailyTasks.isEmpty) return null;
+
     return WeeklyPlan(
-      weekLabel: weekLabel,
+      weekLabel: weekLabel.isEmpty ? fileName : weekLabel,
       dateRange: dateRange,
       startDate: startDate,
       endDate: endDate,
@@ -182,20 +215,44 @@ class WeeklyPlan {
     );
   }
 
-  /// 解析 markdown 表格行，返回单元格列表
-  static List<String> _parseTableRow(String line) {
-    var trimmed = line.trim();
-    if (trimmed.startsWith('|')) trimmed = trimmed.substring(1);
-    if (trimmed.endsWith('|')) trimmed = trimmed.substring(0, trimmed.length - 1);
-    return trimmed.split('|').map((c) => c.trim()).toList();
+  /// 该计划的验收清单（`## 验收清单` 里的 `- [ ]` 项，供复盘页使用）
+  List<String> get checklistItems {
+    final out = <String>[];
+    var inChecklist = false;
+    for (final line in rawMarkdown.split('\n')) {
+      final t = line.trim();
+      if (t.startsWith('## 验收清单')) {
+        inChecklist = true;
+        continue;
+      }
+      if (inChecklist && t.startsWith('## ')) break;
+      if (inChecklist) {
+        final m = RegExp(r'^-\s*\[[ xX]\]\s*(.+)$').firstMatch(t);
+        if (m != null) out.add(m.group(1)!.trim());
+      }
+    }
+    return out;
   }
 
-  /// 去除 [[]] 链接标记，保留纯文本
-  static String _cleanWikiLinks(String text) {
-    // [[31-导数的定义]] -> 31-导数的定义
-    // [[目标文件|显示文本]] -> 显示文本
-    return text.replaceAllMapped(RegExp(r'\[\[([^\]|]+)(?:\|([^\]]+))?\]\]'), (m) {
-      return m.group(2) ?? m.group(1)!;
-    });
+  static List<String> _splitRow(String line) {
+    var t = line.trim();
+    if (t.startsWith('|')) t = t.substring(1);
+    if (t.endsWith('|')) t = t.substring(0, t.length - 1);
+    return t.split('|').map((c) => c.trim()).toList();
+  }
+
+  static bool _isSeparator(List<String> cols) =>
+      cols.isNotEmpty && cols.every((c) => RegExp(r'^:?-{2,}:?$').hasMatch(c));
+
+  static String _stripLinks(String s) => s.replaceAllMapped(
+        RegExp(r'\[\[([^\]|]+)(\|([^\]]+))?\]\]'),
+        (m) => (m.group(3) ?? m.group(1) ?? '').trim(),
+      ).trim();
+
+  static (String, String) _splitWeekdayDate(String cell) {
+    final m = RegExp(r'(周[一二三四五六日])\s*(\d{1,2}\.\d{1,2})?').firstMatch(cell);
+    if (m != null) return (m.group(1)!, m.group(2) ?? '');
+    final dm = RegExp(r'\d{1,2}\.\d{1,2}').firstMatch(cell);
+    return ('', dm?.group(0) ?? cell.trim());
   }
 }
