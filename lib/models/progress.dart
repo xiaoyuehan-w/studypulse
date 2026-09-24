@@ -3,20 +3,29 @@
 import 'session.dart';
 import 'weekly_plan.dart';
 
-/// 某范围内的时长分布：科目 -> 分钟（降序由调用方处理）
-Map<String, int> minutesBySubject(Iterable<StudySession> sessions) {
+/// 某范围内的时长分布：科目 -> 秒（展示时再换算；不再丢弃"不足 1 分钟"的记录）
+Map<String, int> secondsBySubject(Iterable<StudySession> sessions) {
   final out = <String, int>{};
   for (final s in sessions) {
-    final m = s.effectiveMinutes;
-    if (m <= 0) continue;
-    out[s.subject] = (out[s.subject] ?? 0) + m;
+    final sec = s.effectiveSeconds;
+    if (sec <= 0) continue;
+    out[s.subject] = (out[s.subject] ?? 0) + sec;
   }
   return out;
 }
 
-/// 总分钟
-int totalMinutes(Iterable<StudySession> sessions) =>
-    sessions.fold(0, (sum, s) => sum + (s.effectiveMinutes > 0 ? s.effectiveMinutes : 0));
+/// 兼容旧调用：秒 → 分钟（向上取整，避免 50 秒被算成 0 分钟）
+Map<String, int> minutesBySubject(Iterable<StudySession> sessions) {
+  final sec = secondsBySubject(sessions);
+  return sec.map((k, v) => MapEntry(k, (v + 59) ~/ 60));
+}
+
+/// 总秒数
+int totalSeconds(Iterable<StudySession> sessions) =>
+    sessions.fold(0, (sum, s) => sum + (s.effectiveSeconds > 0 ? s.effectiveSeconds : 0));
+
+/// 总分钟（向上取整）
+int totalMinutes(Iterable<StudySession> sessions) => (totalSeconds(sessions) + 59) ~/ 60;
 
 /// 按日期过滤（dateKey = yyyy-MM-dd）
 List<StudySession> ofDate(List<StudySession> sessions, DateTime date) =>
@@ -73,7 +82,7 @@ CompletionStat completionOf({
 /// 连续学习天数（含今天；今天没学也允许从昨天起算）
 int streakDays(List<StudySession> sessions, {DateTime? now}) {
   final keys = sessions
-      .where((s) => s.effectiveMinutes > 0)
+      .where((s) => s.effectiveSeconds > 0 || s.source == SessionSource.task) // 有计时或有完成记录都算
       .map((s) => s.dateKey)
       .toSet();
   if (keys.isEmpty) return 0;
@@ -110,21 +119,32 @@ class WeeklyDigest {
     required this.streak,
     required this.notes,
     required this.pendingTasks,
+    this.dailyLines = const [],
   });
 
-  /// 人类可读 + 机器可解析的固定格式（主 AI 收到后可直接落库）
+  /// 周数据文本：人类可读 + 便于主 AI 直接落库（固定格式，勿随意改结构）
   String toCopyText() {
     final sb = StringBuffer()
       ..writeln('【StudyPulse 周数据】$weekLabel（$range）')
-      ..writeln('总时长：${_hm(totalMinutes)}')
+      ..writeln('总时长：${hm(totalMinutes)}')
       ..writeln('完成率：${completion.done}/${completion.total}'
           '（${(completion.rate * 100).round()}%）')
       ..writeln('连续天数：$streak 天')
       ..writeln('各科时长：');
     final entries = minutesBySubject.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    for (final e in entries) {
-      sb.writeln('  - ${e.key}：${_hm(e.value)}');
+    if (entries.isEmpty) {
+      sb.writeln('  - （本周暂无计时记录）');
+    } else {
+      for (final e in entries) {
+        sb.writeln('  - ${e.key}：${hm(e.value)}');
+      }
+    }
+    if (dailyLines.isNotEmpty) {
+      sb.writeln('每日完成：');
+      for (final d in dailyLines) {
+        sb.writeln('  - $d');
+      }
     }
     if (notes.isNotEmpty) {
       sb.writeln('心得：');
@@ -141,10 +161,15 @@ class WeeklyDigest {
     return sb.toString();
   }
 
-  static String _hm(int minutes) {
+  /// 每日一行：9.28 周一 完成 2/3 · 计时 1 小时 20 分
+  final List<String> dailyLines;
+
+  /// 分钟 → 人类可读（供周数据与 UI 复用；不足 1 小时不显示"0 小时"）
+  static String hm(int minutes) {
     final h = minutes ~/ 60;
     final m = minutes % 60;
-    return '$h 小时 $m 分';
+    if (h == 0) return '$m 分';
+    return m == 0 ? '$h 小时' : '$h 小时 $m 分';
   }
 }
 
@@ -176,6 +201,27 @@ WeeklyDigest buildDigest({
     }
   }
 
+  // 每日一行（供周报对照）
+  final dailyLines = <String>[];
+  if (plan != null) {
+    const wd = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    for (final day in plan.coveredDates) {
+      if (day.isAfter(today)) break;
+      final task = plan.getTaskForDate(day);
+      if (task == null) continue;
+      var total = 0, done = 0;
+      for (final e in task.subjects.entries) {
+        if (!DailyTask.isRealTask(e.value)) continue;
+        total++;
+        if (completedKeys.contains('${StudySession.dateKeyOf(day)}#${e.key}')) done++;
+      }
+      final mins = totalMinutes(ofDate(sessions, day));
+      final parts = <String>['完成 $done/$total'];
+      if (mins > 0) parts.add('计时 ${WeeklyDigest.hm(mins)}');
+      dailyLines.add('${day.month}.${day.day} ${wd[day.weekday - 1]} ${parts.join(' · ')}');
+    }
+  }
+
   return WeeklyDigest(
     weekLabel: plan?.weekLabel ?? '本周',
     range: range,
@@ -185,5 +231,25 @@ WeeklyDigest buildDigest({
     streak: streakDays(sessions, now: today),
     notes: week.where((s) => s.note.trim().isNotEmpty).map((s) => '${s.subject}：${s.note.trim()}').toList(),
     pendingTasks: pending,
+    dailyLines: dailyLines,
   );
 }
+
+/// 某区间内的记录（含起止）
+List<StudySession> inRange(List<StudySession> sessions, DateTime from, DateTime to) {
+  final f = DateTime(from.year, from.month, from.day);
+  final t = DateTime(to.year, to.month, to.day).add(const Duration(days: 1));
+  return sessions.where((s) => !s.startAt.isBefore(f) && s.startAt.isBefore(t)).toList();
+}
+
+/// 某月记录
+List<StudySession> ofMonth(List<StudySession> sessions, {DateTime? now}) {
+  final t = now ?? DateTime.now();
+  final from = DateTime(t.year, t.month, 1);
+  final to = DateTime(t.year, t.month + 1, 0); // 当月最后一天
+  return inRange(sessions, from, to);
+}
+
+/// 有记录的天数（当月，用于"账目感"）
+int activeDays(Iterable<StudySession> sessions) =>
+    sessions.where((s) => s.effectiveSeconds > 0).map((s) => s.dateKey).toSet().length;

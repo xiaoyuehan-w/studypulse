@@ -35,8 +35,9 @@ class TimerService {
     final s = running;
     if (s == null) return null;
     final now = DateTime.now();
-    final minutes = now.difference(s.startAt).inMinutes;
-    final done = s.copyWith(endAt: now, minutes: minutes < 0 ? 0 : minutes);
+    final secs = now.difference(s.startAt).inSeconds;
+    final safe = secs < 0 ? 0 : secs;
+    final done = s.copyWith(endAt: now, seconds: safe, minutes: safe ~/ 60);
     await store.updateSession(done);
     return done;
   }
@@ -82,6 +83,22 @@ class TimerService {
       dateKey: StudySession.dateKeyOf(start),
     );
     await store.addSession(s);
+  }
+
+  /// 手动调节某条记录的时长（分钟）——控股人要求：方便测试与补录
+  Future<void> setDuration(String id, int minutes) async {
+    final list = store.sessions;
+    for (final s in list) {
+      if (s.id == id) {
+        final sec = minutes * 60;
+        await store.updateSession(s.copyWith(
+          minutes: minutes,
+          seconds: sec,
+          endAt: s.endAt ?? s.startAt.add(Duration(seconds: sec)),
+        ));
+        return;
+      }
+    }
   }
 
   /// 写心得

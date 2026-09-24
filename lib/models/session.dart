@@ -28,7 +28,8 @@ class StudySession {
   final String subject; // 高数 / 编程 / 英语 / …
   final DateTime startAt;
   final DateTime? endAt; // 进行中为 null
-  final int minutes; // 时长（进行中为 0，结束时计算）
+  final int minutes; // 时长（分钟，兼容旧数据）
+  final int seconds; // 真实时长（秒）——<1 分钟的记录不再归零
   final SessionSource source;
   final String note; // 心得（可空）
   final String dateKey; // yyyy-MM-dd（按本地日期分组）
@@ -39,6 +40,7 @@ class StudySession {
     required this.startAt,
     this.endAt,
     required this.minutes,
+    this.seconds = 0,
     required this.source,
     this.note = '',
     required this.dateKey,
@@ -46,11 +48,25 @@ class StudySession {
 
   bool get isRunning => endAt == null;
 
-  /// 进行中时按"现在"计算已用分钟
-  int get effectiveMinutes {
-    if (endAt != null) return minutes;
-    final d = DateTime.now().difference(startAt).inMinutes;
+  /// 真实秒数：优先用 seconds（新数据）；旧数据回退 minutes*60；进行中按现在算
+  int get effectiveSeconds {
+    if (endAt != null) {
+      if (seconds > 0) return seconds;
+      return minutes * 60;
+    }
+    final d = DateTime.now().difference(startAt).inSeconds;
     return d < 0 ? 0 : d;
+  }
+
+  /// 秒 → 分钟（向上取整：用于**统计口径**，避免 50 秒被算成 0）
+  int get effectiveMinutes => (effectiveSeconds + 59) ~/ 60;
+
+  /// 计时显示用 mm:ss —— **向下取整**，从 00:00 起（修：此前用 effectiveMinutes 会 1 秒变 01:01）
+  String get clockLabel {
+    final sec = effectiveSeconds;
+    final m = sec ~/ 60;
+    final r = sec % 60;
+    return '${m.toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
   }
 
   /// 展示用时间段：13:48–14:35 / 13:48–进行中
@@ -62,19 +78,23 @@ class StudySession {
   }
 
   String get durationLabel {
-    final m = effectiveMinutes;
+    if (isRunning) return '';
+    final sec = effectiveSeconds;
+    if (sec < 60) return sec <= 0 ? '已完成' : '$sec 秒';
+    final m = sec ~/ 60; // 向下取整：61 秒显示「1 分钟」，不夸大
     if (m < 60) return '$m 分钟';
     final h = m ~/ 60;
     final r = m % 60;
     return r == 0 ? '$h 小时' : '$h 小时 $r 分';
   }
 
-  StudySession copyWith({DateTime? endAt, int? minutes, String? note}) => StudySession(
+  StudySession copyWith({DateTime? endAt, int? minutes, int? seconds, String? note}) => StudySession(
         id: id,
         subject: subject,
         startAt: startAt,
         endAt: endAt ?? this.endAt,
         minutes: minutes ?? this.minutes,
+        seconds: seconds ?? this.seconds,
         source: source,
         note: note ?? this.note,
         dateKey: dateKey,
@@ -86,6 +106,7 @@ class StudySession {
         'startAt': startAt.toIso8601String(),
         'endAt': endAt?.toIso8601String(),
         'minutes': minutes,
+        'seconds': seconds,
         'source': source.name,
         'note': note,
         'dateKey': dateKey,
@@ -97,6 +118,7 @@ class StudySession {
         startAt: DateTime.tryParse(j['startAt'] as String? ?? '') ?? DateTime.now(),
         endAt: j['endAt'] == null ? null : DateTime.tryParse('${j['endAt']}'),
         minutes: (j['minutes'] as num?)?.toInt() ?? 0,
+        seconds: (j['seconds'] as num?)?.toInt() ?? 0,
         source: SessionSourceLabel.fromName(j['source'] as String?),
         note: j['note'] as String? ?? '',
         dateKey: j['dateKey'] as String? ?? '',

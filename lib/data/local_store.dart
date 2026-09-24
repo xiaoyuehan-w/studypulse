@@ -162,6 +162,20 @@ class LocalStore {
   Set<String> get completedKeys =>
       (_p.getStringList(_kDone) ?? const <String>[]).toSet();
 
+  // ---------- 验收清单打勾 ----------
+  Set<String> get checklistDone =>
+      (_p.getStringList('checklist_done') ?? const <String>[]).toSet();
+
+  Future<void> setChecklistDone(String key, bool done) async {
+    final set = checklistDone;
+    if (done) {
+      set.add(key);
+    } else {
+      set.remove(key);
+    }
+    await _p.setStringList('checklist_done', set.toList());
+  }
+
   Future<void> setCompleted(String key, bool done) async {
     final set = completedKeys;
     if (done) {
