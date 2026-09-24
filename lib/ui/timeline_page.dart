@@ -5,10 +5,20 @@ import 'package:flutter/services.dart';
 
 import '../app_services.dart';
 import '../models/session.dart';
+import 'widgets/donut_chart.dart';
 
-class TimelinePage extends StatelessWidget {
+class TimelinePage extends StatefulWidget {
   final AppServices services;
   const TimelinePage({super.key, required this.services});
+
+  @override
+  State<TimelinePage> createState() => _TimelinePageState();
+}
+
+class _TimelinePageState extends State<TimelinePage> {
+  String _range = 'week'; // day / week / month
+
+  AppServices get services => widget.services;
 
   @override
   Widget build(BuildContext context) {
@@ -51,6 +61,8 @@ class TimelinePage extends StatelessWidget {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              _statsCard(s),
+              const SizedBox(height: 8),
               _summary(s),
               const SizedBox(height: 8),
               for (final d in dates) ...[
@@ -66,6 +78,79 @@ class TimelinePage extends StatelessWidget {
       ),
     );
   }
+
+  /// 统计卡：区间切换 + 环形图 + 图例（S2 核心）
+  Widget _statsCard(AppServices s) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([s.sessions, s.completed]),
+      builder: (_, __) {
+        final map = s.minutesIn(_range);
+        final entries = map.entries.where((e) => e.value > 0).toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+        final slices = <SubjectSlice>[];
+        for (var i = 0; i < entries.length; i++) {
+          slices.add(SubjectSlice(
+            name: entries[i].key,
+            minutes: entries[i].value,
+            color: kSliceColors[i % kSliceColors.length],
+          ));
+        }
+        final total = s.minutesTotalIn(_range);
+        final c = s.weekCompletion;
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const Text('学习分布', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const Spacer(),
+                    SegmentedButton<String>(
+                      style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                      segments: const [
+                        ButtonSegment(value: 'day', label: Text('日')),
+                        ButtonSegment(value: 'week', label: Text('周')),
+                        ButtonSegment(value: 'month', label: Text('月')),
+                      ],
+                      selected: {_range},
+                      onSelectionChanged: (v) => setState(() => _range = v.first),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                DonutChart(
+                  slices: slices,
+                  centerTop: total == 0 ? '' : DonutLegend.hm(total),
+                  centerBottom: total == 0 ? '' : '总计',
+                ),
+                const SizedBox(height: 12),
+                DonutLegend(slices: slices),
+                const Divider(height: 24),
+                Row(
+                  children: [
+                    _metric('本周完成', '${c.done}/${c.total}'),
+                    _metric('完成率', '${(c.rate * 100).round()}%'),
+                    _metric('连续天数', '${s.streak} 天'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _metric(String label, String value) => Expanded(
+        child: Column(
+          children: [
+            Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 2),
+            Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+          ],
+        ),
+      );
 
   Widget _summary(AppServices s) {
     final c = s.weekCompletion;

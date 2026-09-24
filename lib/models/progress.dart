@@ -187,3 +187,22 @@ WeeklyDigest buildDigest({
     pendingTasks: pending,
   );
 }
+
+/// 某区间内的记录（含起止）
+List<StudySession> inRange(List<StudySession> sessions, DateTime from, DateTime to) {
+  final f = DateTime(from.year, from.month, from.day);
+  final t = DateTime(to.year, to.month, to.day).add(const Duration(days: 1));
+  return sessions.where((s) => !s.startAt.isBefore(f) && s.startAt.isBefore(t)).toList();
+}
+
+/// 某月记录
+List<StudySession> ofMonth(List<StudySession> sessions, {DateTime? now}) {
+  final t = now ?? DateTime.now();
+  final from = DateTime(t.year, t.month, 1);
+  final to = DateTime(t.year, t.month + 1, 0); // 当月最后一天
+  return inRange(sessions, from, to);
+}
+
+/// 有记录的天数（当月，用于"账目感"）
+int activeDays(Iterable<StudySession> sessions) =>
+    sessions.where((s) => s.effectiveMinutes > 0).map((s) => s.dateKey).toSet().length;

@@ -52,7 +52,7 @@ class PlanPage extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               ...plan.dailyTasks.map((d) => _dayCard(s, d, today)),
-              if (plan.checklistItems.isNotEmpty) _checklist(plan),
+              if (plan.checklistItems.isNotEmpty) _checklist(s, plan),
             ],
           );
         },
@@ -118,32 +118,47 @@ class PlanPage extends StatelessWidget {
     return start.add(Duration(days: idx));
   }
 
-  Widget _checklist(WeeklyPlan plan) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('验收清单', style: TextStyle(fontWeight: FontWeight.w600)),
-              const SizedBox(height: 8),
-              ...plan.checklistItems.map((c) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Icon(Icons.check_box_outline_blank, size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(c, style: const TextStyle(fontSize: 13))),
-                      ],
-                    ),
-                  )),
-              const SizedBox(height: 6),
-              Text(
-                '（打勾功能在下一版开放；当前可在周日的「周数据」里一并确认）',
-                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-              ),
-            ],
+  /// 验收清单：可勾选（本地保存，不写回 vault；周日复盘时逐条确认）
+  Widget _checklist(AppServices s, WeeklyPlan plan) {
+    final items = plan.checklistItems;
+    return ListenableBuilder(
+      listenable: s.checklistChecked,
+      builder: (_, __) {
+        final doneCount = List.generate(items.length, (i) => i)
+            .where((i) => s.isChecklistDone(plan.fileName, i))
+            .length;
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Text('验收清单', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const Spacer(),
+                    Text('$doneCount/${items.length}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                for (var i = 0; i < items.length; i++)
+                  CheckboxListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: s.isChecklistDone(plan.fileName, i),
+                    onChanged: (_) => s.toggleChecklist(plan.fileName, i),
+                    title: Text(items[i], style: const TextStyle(fontSize: 13)),
+                  ),
+                const SizedBox(height: 4),
+                Text('勾选记在本机；周日复盘时我在周报里一起确认',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+              ],
+            ),
           ),
-        ),
-      );
+        );
+      },
+    );
+  }
 }

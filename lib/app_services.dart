@@ -44,6 +44,7 @@ class AppServices {
   void _loadLocal() {
     sessions.value = store.sessions;
     completed.value = store.completedKeys;
+    loadChecklist();
     final cached = store.cachedPlan;
     if (cached != null && cached.isNotEmpty) {
       plan.value = WeeklyPlan.parse(cached, fileName: 'cache.md');
@@ -132,6 +133,37 @@ class AppServices {
       );
 
   List<StudySession> sessionsOfDay(DateTime d) => ofDate(sessions.value, d);
+
+  // ---------- 验收清单 ----------
+  final ValueNotifier<Set<String>> checklistChecked = ValueNotifier(const {});
+
+  void loadChecklist() => checklistChecked.value = store.checklistDone;
+
+  bool isChecklistDone(String planFile, int index) =>
+      checklistChecked.value.contains('$planFile#$index');
+
+  Future<void> toggleChecklist(String planFile, int index) async {
+    final key = '$planFile#$index';
+    final now = checklistChecked.value.contains(key);
+    await store.setChecklistDone(key, !now);
+    checklistChecked.value = store.checklistDone;
+  }
+
+  /// 按区间取时长分布（日/周/月切换用）
+  Map<String, int> minutesIn(String range) {
+    final now = DateTime.now();
+    final list = switch (range) {
+      'day' => ofDate(sessions.value, now),
+      'month' => ofMonth(sessions.value, now: now),
+      _ => ofWeek(sessions.value, now: now),
+    };
+    return minutesBySubject(list);
+  }
+
+  int minutesTotalIn(String range) {
+    final m = minutesIn(range);
+    return m.values.fold(0, (a, b) => a + b);
+  }
 
   /// 保存 GitHub 配置（设置页用）
   Future<void> saveCredentials({
