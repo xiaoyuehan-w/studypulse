@@ -1,6 +1,8 @@
 // 本周页：章节目标 + 7 天任务 + 验收清单（只读展示，S2 起可勾选）
 import 'package:flutter/material.dart';
 
+import 'package:flutter/services.dart';
+
 import '../app_services.dart';
 import '../models/weekly_plan.dart';
 
@@ -23,6 +25,7 @@ class PlanPage extends StatelessWidget {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              _reviewCard(context, s, plan),
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -59,6 +62,72 @@ class PlanPage extends StatelessWidget {
       ),
     );
   }
+
+  /// 周日复盘卡：三个关键数字 + 一键复制周数据（发给主 AI 落库）
+  Widget _reviewCard(BuildContext context, AppServices s, WeeklyPlan plan) {
+    final d = s.digest;
+    final c = s.weekCompletion;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Text('本周复盘', style: TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(width: 8),
+                Text('${plan.weekLabel}（${d.range}）',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                _num('完成率', '${(c.rate * 100).round()}%', sub: '${c.done}/${c.total}', strong: true),
+                _num('总时长', '${d.totalMinutes ~/ 60}h${(d.totalMinutes % 60)}m'),
+                _num('连续天数', '${s.streak} 天'),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                icon: const Icon(Icons.copy_all, size: 18),
+                label: const Text('复制本周数据（发给主 AI）'),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: d.toCopyText()));
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('已复制：粘贴给主 AI 即可写入周报')),
+                    );
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text('每周日复盘一次：看三个数字 → 勾验收清单 → 复制数据发给主 AI',
+                style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _num(String label, String value, {String? sub, bool strong = false}) => Expanded(
+        child: Column(
+          children: [
+            Text(value,
+                style: TextStyle(
+                  fontSize: strong ? 20 : 16,
+                  fontWeight: FontWeight.w700,
+                  color: strong ? const Color(0xFF2F6FED) : null,
+                )),
+            const SizedBox(height: 2),
+            Text(sub ?? label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+          ],
+        ),
+      );
 
   Widget _dayCard(AppServices s, DailyTask d, DateTime today) {
     final isToday = _isToday(d, today);
