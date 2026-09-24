@@ -282,24 +282,34 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final plan = await widget.github.getLatestWeeklyPlan();
       if (plan != null) {
-        await widget.storage.cacheWeeklyPlan(plan.rawMarkdown);
-        // 重新设定通知
-        await widget.notifications.scheduleWeeklyNotifications(
-          plan,
-          hour: widget.storage.pushHour,
-          minute: widget.storage.pushMinute,
-        );
-        setState(() => _plan = plan);
+        // 写缓存与排通知属于副作用：失败也不能阻断本次显示，
+        // 否则「拉到数据但首页仍空白」这类问题会被归因到 Token/网络，误导排查。
+        try {
+          await widget.storage.cacheWeeklyPlan(plan.rawMarkdown);
+          await widget.notifications.scheduleWeeklyNotifications(
+            plan,
+            hour: widget.storage.pushHour,
+            minute: widget.storage.pushMinute,
+          );
+        } catch (_) {
+          // 忽略：缓存/通知失败不影响首页展示
+        }
+        setState(() {
+          _plan = plan;
+          _error = null;
+        });
       } else {
         // 拉取成功但仓库里没有周计划文件：同样要兜缓存。
         // 否则首页显示空态而「本周计划」页有缓存数据，两页不一致、误导排查。
         final cached = await widget.storage.getCachedWeeklyPlan();
         if (cached != null) {
-          await widget.notifications.scheduleWeeklyNotifications(
-            cached,
-            hour: widget.storage.pushHour,
-            minute: widget.storage.pushMinute,
-          );
+          try {
+            await widget.notifications.scheduleWeeklyNotifications(
+              cached,
+              hour: widget.storage.pushHour,
+              minute: widget.storage.pushMinute,
+            );
+          } catch (_) {}
         }
         setState(() {
           _plan = cached;
@@ -313,11 +323,13 @@ class _HomeScreenState extends State<HomeScreen> {
       final cached = await widget.storage.getCachedWeeklyPlan();
       if (cached != null) {
         // 缓存兜底调度：断网期间推送不丢（旧计划总比没提醒好，hub#45）
-        await widget.notifications.scheduleWeeklyNotifications(
-          cached,
-          hour: widget.storage.pushHour,
-          minute: widget.storage.pushMinute,
-        );
+        try {
+          await widget.notifications.scheduleWeeklyNotifications(
+            cached,
+            hour: widget.storage.pushHour,
+            minute: widget.storage.pushMinute,
+          );
+        } catch (_) {}
       }
       setState(() {
         _plan = cached;
