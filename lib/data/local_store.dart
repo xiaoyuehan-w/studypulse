@@ -1,7 +1,9 @@
 // 本地存储：Token / 设置 / 计划缓存 / 学习记录 / 完成标记
 // 原则：App 只读 vault，一切写操作都落在本地（shared_preferences）
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/session.dart';
@@ -20,8 +22,56 @@ class LocalStore {
   final SharedPreferences _p;
   LocalStore(this._p);
 
-  static Future<LocalStore> open() async =>
-      LocalStore(await SharedPreferences.getInstance());
+  static Future<LocalStore> open() async {
+    final s = LocalStore(await SharedPreferences.getInstance());
+    await s.migrateLegacy();
+    return s;
+  }
+
+  /// 一次性迁移：旧版（v1.1.x）→ 新版（v1.2+）
+  /// 旧键名与存储位置不同（github_token / gh_token；缓存是文件而非 prefs；
+  /// 完成标记 completed_tasks_<date> = ["科目|任务"] → completed_keys = ["date#科目"]）。
+  /// 目的：**覆盖安装后用户不必重填 Token**，也不必重打勾。
+  Future<void> migrateLegacy() async {
+    // ① 凭据
+    if (token.isEmpty) {
+      final v = _p.getString('github_token');
+      if (v != null && v.isNotEmpty) await _p.setString(_kToken, v);
+    }
+    if (owner.isEmpty) {
+      final v = _p.getString('github_owner');
+      if (v != null && v.isNotEmpty) await _p.setString(_kOwner, v);
+    }
+    if (repo.isEmpty) {
+      final v = _p.getString('github_repo');
+      if (v != null && v.isNotEmpty) await _p.setString(_kRepo, v);
+    }
+
+    // ② 周计划缓存（旧版写在 App 文档目录的文件里）
+    if ((_p.getString(_kCache) ?? '').isEmpty) {
+      try {
+        final dir = await getApplicationDocumentsDirectory();
+        final f = File('${dir.path}/latest_weekly_plan.md');
+        if (await f.exists()) {
+          final content = await f.readAsString();
+          if (content.trim().isNotEmpty) await _p.setString(_kCache, content);
+        }
+      } catch (_) {/* 迁移失败不影响使用，重新同步即可 */}
+    }
+
+    // ③ 完成标记
+    if ((_p.getStringList(_kDone) ?? const <String>[]).isEmpty) {
+      final out = <String>[];
+      for (final key in _p.getKeys().where((k) => k.startsWith('completed_tasks_'))) {
+        final date = key.substring('completed_tasks_'.length);
+        for (final item in _p.getStringList(key) ?? const <String>[]) {
+          final subject = item.split('|').first.trim();
+          if (subject.isNotEmpty) out.add('$date#$subject');
+        }
+      }
+      if (out.isNotEmpty) await _p.setStringList(_kDone, out);
+    }
+  }
 
   // ---------- GitHub 配置 ----------
   String get token => _p.getString(_kToken) ?? '';
