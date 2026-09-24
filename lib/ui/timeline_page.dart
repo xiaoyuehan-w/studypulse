@@ -129,8 +129,9 @@ class _TimelinePageState extends State<TimelinePage> {
                 const Divider(height: 24),
                 Row(
                   children: [
-                    _metric('本周完成', '${c.done}/${c.total}'),
-                    _metric('完成率', '${(c.rate * 100).round()}%'),
+                    _metric('完成率', '${(c.rate * 100).round()}%',
+                        sub: '${c.done}/${c.total}', emphasize: true),
+                    _metric('总时长', DonutLegend.hm(total)),
                     _metric('连续天数', '${s.streak} 天'),
                   ],
                 ),
@@ -142,12 +143,19 @@ class _TimelinePageState extends State<TimelinePage> {
     );
   }
 
-  Widget _metric(String label, String value) => Expanded(
+  Widget _metric(String label, String value, {String? sub, bool emphasize = false}) => Expanded(
         child: Column(
           children: [
-            Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: emphasize ? 20 : 16,
+                fontWeight: FontWeight.w700,
+                color: emphasize ? const Color(0xFF2F6FED) : null,
+              ),
+            ),
             const SizedBox(height: 2),
-            Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+            Text(sub ?? label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
           ],
         ),
       );
@@ -196,28 +204,50 @@ class _TimelinePageState extends State<TimelinePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(x.durationLabel, style: const TextStyle(fontSize: 12)),
+            // 完成记录不显示"0 分钟"（豆包顾问意见）
+            Text(
+              x.source == SessionSource.task ? '已完成' : x.durationLabel,
+              style: const TextStyle(fontSize: 12),
+            ),
             if (x.isRunning)
               const Text('进行中', style: TextStyle(fontSize: 11, color: Color(0xFF2F6FED))),
           ],
         ),
-        onTap: () => _editNote(context, s, x),
+        onTap: () => _editSession(context, s, x),
         onLongPress: () => _confirmDelete(context, s, x),
       ),
     );
   }
 
-  Future<void> _editNote(BuildContext context, AppServices s, StudySession x) async {
-    final ctrl = TextEditingController(text: x.note);
+  /// 编辑这条记录：**时长（分钟）+ 心得**——时长可手动调节（方便测试与补录）
+  Future<void> _editSession(BuildContext context, AppServices s, StudySession x) async {
+    final noteCtrl = TextEditingController(text: x.note);
+    final minCtrl = TextEditingController(
+      text: x.source == SessionSource.task ? '' : '${x.effectiveMinutes}',
+    );
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('${x.subject} · 心得'),
-        content: TextField(
-          controller: ctrl,
-          maxLines: 3,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: '今天学到/卡住了什么？'),
+        title: Text('${x.subject} · ${x.timeRange}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (x.source != SessionSource.task)
+              TextField(
+                controller: minCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: '时长（分钟）',
+                  helperText: '可手动修改，立即计入统计',
+                ),
+              ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: noteCtrl,
+              maxLines: 3,
+              decoration: const InputDecoration(hintText: '心得（今天学到/卡住了什么？）'),
+            ),
+          ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
@@ -225,7 +255,12 @@ class _TimelinePageState extends State<TimelinePage> {
         ],
       ),
     );
-    if (ok == true) await s.setNote(x.id, ctrl.text.trim());
+    if (ok != true) return;
+    await s.setNote(x.id, noteCtrl.text.trim());
+    if (x.source != SessionSource.task) {
+      final m = int.tryParse(minCtrl.text.trim());
+      if (m != null && m >= 0) await s.setDuration(x.id, m);
+    }
   }
 
   Future<void> _confirmDelete(BuildContext context, AppServices s, StudySession x) async {

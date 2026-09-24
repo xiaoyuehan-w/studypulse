@@ -190,13 +190,6 @@ class _TodayPageState extends State<TodayPage> {
     final isThisRunning = running && live != null && live.subject == subject;
     final elapsed = isThisRunning ? _elapsed(live) : runningLabel;
     return Card(
-      // 计时中的卡片高亮边框——"图形跟着状态变"的一部分
-      shape: isThisRunning
-          ? RoundedRectangleBorder(
-              side: const BorderSide(color: Color(0xFF2F6FED), width: 1.5),
-              borderRadius: BorderRadius.circular(12),
-            )
-          : null,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
         child: Row(
@@ -212,17 +205,6 @@ class _TodayPageState extends State<TodayPage> {
                   Row(
                     children: [
                       Text(subject, style: const TextStyle(fontWeight: FontWeight.w600)),
-                      if (isThisRunning) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE8F0FE),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Text('计时中', style: TextStyle(fontSize: 11, color: Color(0xFF2F6FED))),
-                        ),
-                      ],
                       if (done) ...[
                         const SizedBox(width: 6),
                         const Text('已完成', style: TextStyle(fontSize: 11, color: Colors.green)),

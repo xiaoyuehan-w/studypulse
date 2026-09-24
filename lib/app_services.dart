@@ -113,6 +113,12 @@ class AppServices {
     sessions.value = store.sessions;
   }
 
+  /// 手动改时长（分钟）
+  Future<void> setDuration(String id, int minutes) async {
+    await timer.setDuration(id, minutes);
+    sessions.value = store.sessions;
+  }
+
   Future<void> deleteSession(String id) async {
     await store.deleteSession(id);
     sessions.value = store.sessions;

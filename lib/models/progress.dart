@@ -3,20 +3,29 @@
 import 'session.dart';
 import 'weekly_plan.dart';
 
-/// 某范围内的时长分布：科目 -> 分钟（降序由调用方处理）
-Map<String, int> minutesBySubject(Iterable<StudySession> sessions) {
+/// 某范围内的时长分布：科目 -> 秒（展示时再换算；不再丢弃"不足 1 分钟"的记录）
+Map<String, int> secondsBySubject(Iterable<StudySession> sessions) {
   final out = <String, int>{};
   for (final s in sessions) {
-    final m = s.effectiveMinutes;
-    if (m <= 0) continue;
-    out[s.subject] = (out[s.subject] ?? 0) + m;
+    final sec = s.effectiveSeconds;
+    if (sec <= 0) continue;
+    out[s.subject] = (out[s.subject] ?? 0) + sec;
   }
   return out;
 }
 
-/// 总分钟
-int totalMinutes(Iterable<StudySession> sessions) =>
-    sessions.fold(0, (sum, s) => sum + (s.effectiveMinutes > 0 ? s.effectiveMinutes : 0));
+/// 兼容旧调用：秒 → 分钟（向上取整，避免 50 秒被算成 0 分钟）
+Map<String, int> minutesBySubject(Iterable<StudySession> sessions) {
+  final sec = secondsBySubject(sessions);
+  return sec.map((k, v) => MapEntry(k, (v + 59) ~/ 60));
+}
+
+/// 总秒数
+int totalSeconds(Iterable<StudySession> sessions) =>
+    sessions.fold(0, (sum, s) => sum + (s.effectiveSeconds > 0 ? s.effectiveSeconds : 0));
+
+/// 总分钟（向上取整）
+int totalMinutes(Iterable<StudySession> sessions) => (totalSeconds(sessions) + 59) ~/ 60;
 
 /// 按日期过滤（dateKey = yyyy-MM-dd）
 List<StudySession> ofDate(List<StudySession> sessions, DateTime date) =>
@@ -73,7 +82,7 @@ CompletionStat completionOf({
 /// 连续学习天数（含今天；今天没学也允许从昨天起算）
 int streakDays(List<StudySession> sessions, {DateTime? now}) {
   final keys = sessions
-      .where((s) => s.effectiveMinutes > 0)
+      .where((s) => s.effectiveSeconds > 0 || s.source == SessionSource.task) // 有计时或有完成记录都算
       .map((s) => s.dateKey)
       .toSet();
   if (keys.isEmpty) return 0;
@@ -205,4 +214,4 @@ List<StudySession> ofMonth(List<StudySession> sessions, {DateTime? now}) {
 
 /// 有记录的天数（当月，用于"账目感"）
 int activeDays(Iterable<StudySession> sessions) =>
-    sessions.where((s) => s.effectiveMinutes > 0).map((s) => s.dateKey).toSet().length;
+    sessions.where((s) => s.effectiveSeconds > 0).map((s) => s.dateKey).toSet().length;
