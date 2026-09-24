@@ -1,115 +1,97 @@
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-
-/// 学习计时前台服务
-///
-/// 设计原则：计时的唯一事实来源是"开始时间戳"（由 StorageService 落盘），
-/// 本服务只负责在通知栏实时展示。因此即使服务被国产 ROM 杀掉、手机重启，
-/// 重新打开 App 也能从时间戳恢复计时，时长不丢。
-
-/// 任务处理器：运行在独立 isolate，按 Repeat 事件刷新通知文本
-class StudyTimerHandler extends TaskHandler {
-  @override
-  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {}
-
-  @override
-  void onRepeatEvent(DateTime timestamp) {
-    refreshNotification();
-  }
-
-  @override
-  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
-}
-
-/// 根据服务侧保存的开始时间戳，刷新通知栏文本
-Future<void> refreshNotification() async {
-  final subject = await FlutterForegroundTask.getData<String>(key: 'study_subject');
-  final startMs = await FlutterForegroundTask.getData<int>(key: 'study_start_ms');
-  if (subject == null || subject.isEmpty || startMs == null || startMs == 0) {
-    return;
-  }
-  final minutes = DateTime.now()
-      .difference(DateTime.fromMillisecondsSinceEpoch(startMs))
-      .inMinutes;
-  await FlutterForegroundTask.updateService(
-    notificationTitle: '正在学习：$subject',
-    notificationText: '已学 $minutes 分钟 · 打开 App 结束计时',
-  );
-}
-
-/// 服务启动入口（必须为顶层函数，且标注 vm:entry-point）
-@pragma('vm:entry-point')
-void studyTimerCallback() {
-  FlutterForegroundTask.setTaskHandler(StudyTimerHandler());
-}
+// 学习计时
+// 设计要点（沿用旧版已验证的设计）：**开始时间戳是唯一事实源**——
+// 时长 = 现在 − 开始，所以杀进程/重启后时长不丢，重新打开即可恢复。
+import '../data/local_store.dart';
+import '../models/session.dart';
 
 class TimerService {
-  static const int _serviceId = 1001;
-  static const String _keySubject = 'study_subject';
-  static const String _keyStartMs = 'study_start_ms';
+  final LocalStore store;
+  TimerService(this.store);
 
-  /// 初始化通知渠道与任务配置（App 启动时调用一次）
-  static void init() {
-    FlutterForegroundTask.init(
-      androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'study_timer',
-        channelName: '学习计时',
-        channelDescription: '开始学习后常驻显示计时状态',
-        onlyAlertOnce: true,
-        channelImportance: NotificationChannelImportance.LOW,
-        priority: NotificationPriority.LOW,
-      ),
-      iosNotificationOptions: const IOSNotificationOptions(
-        showNotification: false,
-        playSound: false,
-      ),
-      foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.repeat(60000), // 每分钟刷新"已学X分钟"
-        autoRunOnBoot: false, // 恢复逻辑由 App 负责（基于时间戳，更可靠）
-        allowWakeLock: true,
-      ),
+  /// 正在进行的那条记录（若有）
+  StudySession? get running => store.runningSession;
+
+  bool get isRunning => running != null;
+
+  /// 开始一段学习（同一时刻只允许一段）
+  Future<StudySession> start(String subject) async {
+    final exist = running;
+    if (exist != null) return exist; // 已在计时则返回现有
+    final now = DateTime.now();
+    final s = StudySession(
+      id: '${now.millisecondsSinceEpoch}',
+      subject: subject,
+      startAt: now,
+      minutes: 0,
+      source: SessionSource.timer,
+      dateKey: StudySession.dateKeyOf(now),
     );
+    await store.addSession(s);
+    return s;
   }
 
-  /// 通知权限检查/申请（Android 13+ 前台服务通知必需）
-  static Future<void> ensureNotificationPermission() async {
-    final permission = await FlutterForegroundTask.checkNotificationPermission();
-    if (permission != NotificationPermission.granted) {
-      await FlutterForegroundTask.requestNotificationPermission();
+  /// 结束当前学习，落一条完成记录
+  Future<StudySession?> stop() async {
+    final s = running;
+    if (s == null) return null;
+    final now = DateTime.now();
+    final minutes = now.difference(s.startAt).inMinutes;
+    final done = s.copyWith(endAt: now, minutes: minutes < 0 ? 0 : minutes);
+    await store.updateSession(done);
+    return done;
+  }
+
+  /// 取消当前学习（丢弃这条记录）
+  Future<void> cancel() async {
+    final s = running;
+    if (s == null) return;
+    await store.deleteSession(s.id);
+  }
+
+  /// 任务打勾 → 也在时间轴上留一条记录（控股人要求：划掉一个就进时间轴）
+  Future<void> logTaskDone(String subject, {int minutes = 0}) async {
+    final now = DateTime.now();
+    final s = StudySession(
+      id: 'task-${now.millisecondsSinceEpoch}',
+      subject: subject,
+      startAt: now,
+      endAt: now,
+      minutes: minutes,
+      source: SessionSource.task,
+      dateKey: StudySession.dateKeyOf(now),
+    );
+    await store.addSession(s);
+  }
+
+  /// 手动补录
+  Future<void> logManual({
+    required String subject,
+    required DateTime start,
+    required int minutes,
+    String note = '',
+  }) async {
+    final end = start.add(Duration(minutes: minutes));
+    final s = StudySession(
+      id: 'manual-${start.millisecondsSinceEpoch}',
+      subject: subject,
+      startAt: start,
+      endAt: end,
+      minutes: minutes,
+      source: SessionSource.manual,
+      note: note,
+      dateKey: StudySession.dateKeyOf(start),
+    );
+    await store.addSession(s);
+  }
+
+  /// 写心得
+  Future<void> setNote(String id, String note) async {
+    final list = store.sessions;
+    for (final s in list) {
+      if (s.id == id) {
+        await store.updateSession(s.copyWith(note: note));
+        return;
+      }
     }
   }
-
-  /// 开始计时：写入状态并启动前台服务
-  static Future<bool> start(String subject, DateTime startTime) async {
-    await FlutterForegroundTask.saveData(key: _keySubject, value: subject);
-    await FlutterForegroundTask.saveData(
-        key: _keyStartMs, value: startTime.millisecondsSinceEpoch);
-
-    if (await FlutterForegroundTask.isRunningService) {
-      final result = await FlutterForegroundTask.restartService();
-      return result is ServiceRequestSuccess;
-    }
-    final result = await FlutterForegroundTask.startService(
-      serviceId: _serviceId,
-      serviceTypes: const [ForegroundServiceTypes.specialUse],
-      notificationTitle: '正在学习：$subject',
-      notificationText: '已学 0 分钟 · 打开 App 结束计时',
-      callback: studyTimerCallback,
-    );
-    return result is ServiceRequestSuccess;
-  }
-
-  /// 结束计时：停止服务并清理服务侧状态
-  static Future<void> stop() async {
-    await FlutterForegroundTask.stopService();
-    await FlutterForegroundTask.removeData(key: _keySubject);
-    await FlutterForegroundTask.removeData(key: _keyStartMs);
-  }
-
-  /// 是否已在电池优化白名单
-  static Future<bool> isIgnoringBatteryOptimizations() =>
-      FlutterForegroundTask.isIgnoringBatteryOptimizations;
-
-  /// 请求加入电池优化白名单（跳转系统设置页）
-  static Future<void> requestIgnoreBatteryOptimization() =>
-      FlutterForegroundTask.requestIgnoreBatteryOptimization();
 }
