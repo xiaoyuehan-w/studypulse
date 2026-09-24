@@ -17,6 +17,8 @@ class TimelinePage extends StatefulWidget {
 
 class _TimelinePageState extends State<TimelinePage> {
   String _range = 'week'; // day / week / month
+  bool _selecting = false; // 多选模式
+  final Set<String> _selected = {};
 
   AppServices get services => widget.services;
 
@@ -27,19 +29,53 @@ class _TimelinePageState extends State<TimelinePage> {
       appBar: AppBar(
         title: const Text('时间轴'),
         actions: [
-          IconButton(
-            tooltip: '复制本周数据（发给主 AI）',
-            icon: const Icon(Icons.copy_all),
-            onPressed: () async {
-              final text = s.digest.toCopyText();
-              await Clipboard.setData(ClipboardData(text: text));
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('本周数据已复制，粘贴给主 AI 即可落库')),
-                );
-              }
-            },
-          ),
+          if (_selecting) ...[
+            TextButton(
+              onPressed: () => setState(() {
+                final all = s.sessions.value.map((e) => e.id).toSet();
+                if (_selected.length == all.length) {
+                  _selected.clear();
+                } else {
+                  _selected
+                    ..clear()
+                    ..addAll(all);
+                }
+              }),
+              child: Text(_selected.length == s.sessions.value.length ? '取消全选' : '全选'),
+            ),
+            IconButton(
+              tooltip: '删除选中',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _selected.isEmpty ? null : () => _confirmBulkDelete(context, s),
+            ),
+            IconButton(
+              tooltip: '退出多选',
+              icon: const Icon(Icons.close),
+              onPressed: () => setState(() {
+                _selecting = false;
+                _selected.clear();
+              }),
+            ),
+          ] else ...[
+            IconButton(
+              tooltip: '批量删除',
+              icon: const Icon(Icons.checklist),
+              onPressed: () => setState(() => _selecting = true),
+            ),
+            IconButton(
+              tooltip: '复制本周数据（发给主 AI）',
+              icon: const Icon(Icons.copy_all),
+              onPressed: () async {
+                final text = s.digest.toCopyText();
+                await Clipboard.setData(ClipboardData(text: text));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('本周数据已复制，粘贴给主 AI 即可落库')),
+                  );
+                }
+              },
+            ),
+          ],
         ],
       ),
       body: ValueListenableBuilder(
@@ -58,6 +94,7 @@ class _TimelinePageState extends State<TimelinePage> {
           }
           final grouped = _groupByDate(sessions);
           final dates = grouped.keys.toList()..sort((a, b) => b.compareTo(a));
+          if (_selecting) _selectBar(s);
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -160,6 +197,18 @@ class _TimelinePageState extends State<TimelinePage> {
         ),
       );
 
+  Widget _selectBar(AppServices s) => Container(
+        color: const Color(0xFFE8F0FE),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Text('已选 ${_selected.length} 条', style: const TextStyle(fontSize: 13)),
+            const Spacer(),
+            const Text('点条目勾选 · 右上角可全选/删除', style: TextStyle(fontSize: 11)),
+          ],
+        ),
+      );
+
   Widget _summary(AppServices s) {
     final c = s.weekCompletion;
     return Card(
@@ -180,13 +229,25 @@ class _TimelinePageState extends State<TimelinePage> {
   }
 
   Widget _sessionCard(BuildContext context, AppServices s, StudySession x) {
+    final checked = _selected.contains(x.id);
     return Card(
       child: ListTile(
         dense: true,
-        leading: CircleAvatar(
-          radius: 16,
-          child: Text(x.subject.characters.first, style: const TextStyle(fontSize: 13)),
-        ),
+        leading: _selecting
+            ? Checkbox(
+                value: checked,
+                onChanged: (_) => setState(() {
+                  if (checked) {
+                    _selected.remove(x.id);
+                  } else {
+                    _selected.add(x.id);
+                  }
+                }),
+              )
+            : CircleAvatar(
+                radius: 16,
+                child: Text(x.subject.characters.first, style: const TextStyle(fontSize: 13)),
+              ),
         title: Row(
           children: [
             Text(x.subject, style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -213,7 +274,15 @@ class _TimelinePageState extends State<TimelinePage> {
               const Text('进行中', style: TextStyle(fontSize: 11, color: Color(0xFF2F6FED))),
           ],
         ),
-        onTap: () => _editSession(context, s, x),
+        onTap: _selecting
+            ? () => setState(() {
+                  if (checked) {
+                    _selected.remove(x.id);
+                  } else {
+                    _selected.add(x.id);
+                  }
+                })
+            : () => _editSession(context, s, x),
         onLongPress: () => _confirmDelete(context, s, x),
       ),
     );
@@ -261,6 +330,29 @@ class _TimelinePageState extends State<TimelinePage> {
       final m = int.tryParse(minCtrl.text.trim());
       if (m != null && m >= 0) await s.setDuration(x.id, m);
     }
+  }
+
+  Future<void> _confirmBulkDelete(BuildContext context, AppServices s) async {
+    final n = _selected.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('删除选中的 $n 条记录？'),
+        content: const Text('删除后统计会同步更新；若删的是"完成"记录，对应勾选也会取消。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final removed = await s.deleteSessions(_selected.toList());
+    if (!context.mounted) return;
+    setState(() {
+      _selected.clear();
+      _selecting = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已删除 $removed 条记录')));
   }
 
   Future<void> _confirmDelete(BuildContext context, AppServices s, StudySession x) async {
