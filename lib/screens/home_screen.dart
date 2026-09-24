@@ -289,8 +289,25 @@ class _HomeScreenState extends State<HomeScreen> {
           hour: widget.storage.pushHour,
           minute: widget.storage.pushMinute,
         );
+        setState(() => _plan = plan);
+      } else {
+        // 拉取成功但仓库里没有周计划文件：同样要兜缓存。
+        // 否则首页显示空态而「本周计划」页有缓存数据，两页不一致、误导排查。
+        final cached = await widget.storage.getCachedWeeklyPlan();
+        if (cached != null) {
+          await widget.notifications.scheduleWeeklyNotifications(
+            cached,
+            hour: widget.storage.pushHour,
+            minute: widget.storage.pushMinute,
+          );
+        }
+        setState(() {
+          _plan = cached;
+          _error = cached == null
+              ? '仓库中暂无周计划文件，请先同步周计划'
+              : '仓库中暂无周计划文件，显示的是缓存内容';
+        });
       }
-      setState(() => _plan = plan);
     } catch (e) {
       // GitHub 拉取失败，用缓存
       final cached = await widget.storage.getCachedWeeklyPlan();
@@ -444,7 +461,12 @@ class _HomeScreenState extends State<HomeScreen> {
       return const Card(
         child: Padding(
           padding: EdgeInsets.all(24),
-          child: Center(child: Text('暂无周计划数据，请先同步或配置 GitHub 访问')),
+          child: Center(
+            child: Text(
+              '暂无周计划数据\n请在「设置」点「保存并验证」，确认 Token 能访问仓库（私有库需勾选 repo 权限）\n或检查网络后下拉刷新',
+              textAlign: TextAlign.center,
+            ),
+          ),
         ),
       );
     }

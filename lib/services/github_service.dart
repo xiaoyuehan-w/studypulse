@@ -83,7 +83,17 @@ class GitHubService {
   /// 获取最新的周计划（已解析）
   Future<WeeklyPlan?> getLatestWeeklyPlan() async {
     final files = await listWeeklyPlans();
-    if (files.isEmpty) return null;
+    if (files.isEmpty) {
+      // 目录为空有两种可能：仓库里确实没有周计划，或 Token 无权访问该私有仓库。
+      // Contents API 对「无权限」与「路径不存在」都返回 404（listDirectory 需按空处理），
+      // 这里用仓库接口再判一次，否则用户只看到「暂无数据」，误以为是自己没配置好。
+      if (!await validateToken()) {
+        throw GitHubException(
+          '无法访问仓库 $owner/$repo（404）：Token 缺少私有库权限或 owner/repo 填写不精确',
+        );
+      }
+      return null;
+    }
 
     final latest = files.first;
     final content = await getFileContent(latest.path);
