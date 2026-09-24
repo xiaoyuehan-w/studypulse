@@ -54,19 +54,24 @@ class _TodayPageState extends State<TodayPage> {
       ),
       body: RefreshIndicator(
         onRefresh: s.refresh,
-        child: ValueListenableBuilder(
-          valueListenable: s.plan,
-          builder: (_, plan, __) => ListView(
+        child: ListenableBuilder(
+          // 同时监听：计划变化 / 记录变化（打卡·计时起停）/ 每秒节拍
+          listenable: Listenable.merge([s.plan, s.sessions, _tick]),
+          builder: (_, __) {
+            final plan = s.plan.value; // 从服务容器读取最新计划
+            return ListView(
             padding: const EdgeInsets.all(16),
             children: [
               _header(s, plan, today),
+              if (s.running != null) _runningBar(s.running!),
               if (s.syncError.value != null) _errorBanner(s.syncError.value!),
               const SizedBox(height: 8),
               ..._subjectCards(s, plan, today),
               const SizedBox(height: 12),
               _footer(s),
             ],
-          ),
+            );
+          },
         ),
       ),
     );
@@ -182,8 +187,16 @@ class _TodayPageState extends State<TodayPage> {
   }) {
     final s = widget.services;
     final live = s.running;
-    final label = (running && live != null && live.subject == subject) ? _elapsed(live) : runningLabel;
+    final isThisRunning = running && live != null && live.subject == subject;
+    final elapsed = isThisRunning ? _elapsed(live) : runningLabel;
     return Card(
+      // 计时中的卡片高亮边框——"图形跟着状态变"的一部分
+      shape: isThisRunning
+          ? RoundedRectangleBorder(
+              side: const BorderSide(color: Color(0xFF2F6FED), width: 1.5),
+              borderRadius: BorderRadius.circular(12),
+            )
+          : null,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
         child: Row(
@@ -196,34 +209,62 @@ class _TodayPageState extends State<TodayPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(subject, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  Row(
+                    children: [
+                      Text(subject, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      if (isThisRunning) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F0FE),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text('计时中', style: TextStyle(fontSize: 11, color: Color(0xFF2F6FED))),
+                        ),
+                      ],
+                      if (done) ...[
+                        const SizedBox(width: 6),
+                        const Text('已完成', style: TextStyle(fontSize: 11, color: Colors.green)),
+                      ],
+                    ],
+                  ),
                   const SizedBox(height: 2),
                   Text(content, style: TextStyle(color: Colors.grey[700], fontSize: 13)),
                 ],
               ),
             ),
-            if (running)
-              ValueListenableBuilder<int>(
-                valueListenable: _tick,
-                builder: (_, __, ___) {
-                  // 在 builder 内部实时取，确保每秒都是最新值
-                  final live = s.running;
-                  final text = (live != null && live.subject == subject)
-                      ? _elapsed(live)
-                      : (label ?? '');
-                  return TextButton.icon(
-                    onPressed: s.stopTimer,
-                    icon: const Icon(Icons.stop_circle_outlined, size: 18),
-                    label: Text('结束 $text'),
-                  );
-                },
-              )
-            else
-              IconButton(
-                tooltip: '开始计时',
-                icon: const Icon(Icons.play_circle_outline),
-                onPressed: () => s.startTimer(subject),
+            if (isThisRunning) ...[
+              Text(elapsed ?? '', style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+              const SizedBox(width: 4),
+            ],
+            // 同一个按钮，图形随状态切换：▶ 开始 ⇄ ⏹ 结束
+            IconButton(
+              tooltip: isThisRunning ? '结束计时' : '开始计时',
+              icon: Icon(
+                isThisRunning ? Icons.stop_circle : Icons.play_circle_outline,
+                color: isThisRunning ? Colors.redAccent : null,
               ),
+              onPressed: isThisRunning ? s.stopTimer : () => s.startTimer(subject),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 顶部"正在计时"状态条（除了卡片，另一处可见的计时反馈）
+  Widget _runningBar(StudySession x) {
+    return Card(
+      color: const Color(0xFFE8F0FE),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            const Icon(Icons.timer_outlined, size: 18, color: Color(0xFF2F6FED)),
+            const SizedBox(width: 8),
+            Expanded(child: Text('正在计时：${x.subject}')),
+            Text(_elapsed(x), style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w600)),
           ],
         ),
       ),

@@ -12,7 +12,7 @@ enum SessionSource {
 extension SessionSourceLabel on SessionSource {
   String get label => switch (this) {
         SessionSource.timer => '计时',
-        SessionSource.task => '任务',
+        SessionSource.task => '已完成',
         SessionSource.manual => '补录',
       };
 
