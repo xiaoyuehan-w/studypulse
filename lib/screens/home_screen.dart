@@ -282,25 +282,54 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final plan = await widget.github.getLatestWeeklyPlan();
       if (plan != null) {
-        await widget.storage.cacheWeeklyPlan(plan.rawMarkdown);
-        // 重新设定通知
-        await widget.notifications.scheduleWeeklyNotifications(
-          plan,
-          hour: widget.storage.pushHour,
-          minute: widget.storage.pushMinute,
-        );
+        // 写缓存与排通知属于副作用：失败也不能阻断本次显示，
+        // 否则「拉到数据但首页仍空白」这类问题会被归因到 Token/网络，误导排查。
+        try {
+          await widget.storage.cacheWeeklyPlan(plan.rawMarkdown);
+          await widget.notifications.scheduleWeeklyNotifications(
+            plan,
+            hour: widget.storage.pushHour,
+            minute: widget.storage.pushMinute,
+          );
+        } catch (_) {
+          // 忽略：缓存/通知失败不影响首页展示
+        }
+        setState(() {
+          _plan = plan;
+          _error = null;
+        });
+      } else {
+        // 拉取成功但仓库里没有周计划文件：同样要兜缓存。
+        // 否则首页显示空态而「本周计划」页有缓存数据，两页不一致、误导排查。
+        final cached = await widget.storage.getCachedWeeklyPlan();
+        if (cached != null) {
+          try {
+            await widget.notifications.scheduleWeeklyNotifications(
+              cached,
+              hour: widget.storage.pushHour,
+              minute: widget.storage.pushMinute,
+            );
+          } catch (_) {}
+        }
+        setState(() {
+          _plan = cached;
+          _error = cached == null
+              ? '仓库中暂无周计划文件，请先同步周计划'
+              : '仓库中暂无周计划文件，显示的是缓存内容';
+        });
       }
-      setState(() => _plan = plan);
     } catch (e) {
       // GitHub 拉取失败，用缓存
       final cached = await widget.storage.getCachedWeeklyPlan();
       if (cached != null) {
         // 缓存兜底调度：断网期间推送不丢（旧计划总比没提醒好，hub#45）
-        await widget.notifications.scheduleWeeklyNotifications(
-          cached,
-          hour: widget.storage.pushHour,
-          minute: widget.storage.pushMinute,
-        );
+        try {
+          await widget.notifications.scheduleWeeklyNotifications(
+            cached,
+            hour: widget.storage.pushHour,
+            minute: widget.storage.pushMinute,
+          );
+        } catch (_) {}
       }
       setState(() {
         _plan = cached;
@@ -444,12 +473,43 @@ class _HomeScreenState extends State<HomeScreen> {
       return const Card(
         child: Padding(
           padding: EdgeInsets.all(24),
-          child: Center(child: Text('暂无周计划数据，请先同步或配置 GitHub 访问')),
+          child: Center(
+            child: Text(
+              '暂无周计划数据\n请在「设置」点「保存并验证」，确认 Token 能访问仓库（私有库需勾选 repo 权限）\n或检查网络后下拉刷新',
+              textAlign: TextAlign.center,
+            ),
+          ),
         ),
       );
     }
 
     final todayTask = _plan!.todayTask;
+    // 当前计划是否覆盖今天：不覆盖说明拿到的不是本周（计划未更新 / 提前生成了别的周）
+    final s = _plan!.startDate;
+    final e = _plan!.endDate;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final coversToday = (s == null || e == null || (!today.isBefore(s) && !today.isAfter(e)));
+    if (!coversToday) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: Column(
+              children: [
+                Icon(Icons.update, size: 48, color: Colors.grey[400]),
+                const SizedBox(height: 8),
+                Text(
+                  '当前显示的是${_plan!.weekLabel}（${_plan!.dateRange}）\n本周计划可能还没更新，点右上角刷新同步',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     if (todayTask == null || !todayTask.hasTasks) {
       return Card(
         child: Padding(
