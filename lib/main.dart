@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'services/plan_sync_service.dart';
 import 'services/storage_service.dart';
 import 'services/github_service.dart';
 import 'services/notification_service.dart';
@@ -27,6 +30,16 @@ void main() async {
 
   // 学习计时前台服务（通知渠道与任务配置）
   TimerService.init();
+
+  // 启动自愈：后台同步周计划并确保推送已调度（不依赖首页是否打开；
+  // 不阻塞 UI，失败静默——详见 PlanSyncService，hub#45 推送根治）
+  unawaited(
+    PlanSyncService(
+      github: github,
+      storage: storage,
+      notifications: notifications,
+    ).ensureScheduled(),
+  );
 
   runApp(StudyPulseApp(
     storage: storage,

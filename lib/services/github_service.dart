@@ -65,6 +65,8 @@ class GitHubService {
     return resp.body;
   }
 
+  // ⚠️ 数据契约（冻结）：以下路径/文件名规则是 App 的读取契约，
+  // 改动必须配套 App 发版 + 用户重装，详见 docs/数据契约.md（hub Issue #45）
   /// 获取周计划目录下所有文件，按文件名中的日期降序排列
   Future<List<RepoFile>> listWeeklyPlans() async {
     final files = await listDirectory('10 项目/考研科软/周计划');

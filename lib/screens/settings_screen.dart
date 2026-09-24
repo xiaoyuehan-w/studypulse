@@ -31,6 +31,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _validating = false;
   String? _validateResult;
   String _batteryStatus = '检查中…';
+  String _notifStatus = '检查中…';
+  String _alarmStatus = '检查中…';
 
   @override
   void initState() {
@@ -39,6 +41,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _ownerController = TextEditingController(text: widget.storage.owner);
     _repoController = TextEditingController(text: widget.storage.repo);
     _refreshBatteryStatus();
+    _refreshPushStatus();
   }
 
   /// 查询电池优化白名单状态
@@ -54,6 +57,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await TimerService.requestIgnoreBatteryOptimization();
     await Future.delayed(const Duration(seconds: 1));
     await _refreshBatteryStatus();
+  }
+
+  /// 刷新推送权限状态（通知权限 + 精确闹钟）
+  Future<void> _refreshPushStatus() async {
+    final notif = await widget.notifications.areNotificationsEnabled();
+    final exact = await widget.notifications.canScheduleExact();
+    if (!mounted) return;
+    setState(() {
+      _notifStatus = notif ? '已授权 ✅' : '未授权，收不到任何推送';
+      _alarmStatus = exact
+          ? '可用 ✅（准点送达）'
+          : '未授权（Android 12+），推送可能延迟最多 15 分钟';
+    });
+  }
+
+  /// 请求通知权限（Android 13+ 弹窗）
+  Future<void> _requestNotificationPermission() async {
+    await widget.notifications.requestPermission();
+    await _refreshPushStatus();
+  }
+
+  /// 跳转系统「闹钟和提醒」授权页
+  Future<void> _openExactAlarmSettings() async {
+    await widget.notifications.openExactAlarmSettings();
+    await Future.delayed(const Duration(seconds: 1));
+    await _refreshPushStatus();
   }
 
   @override
@@ -250,6 +279,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: const Text('验证推送功能是否正常'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: _sendTestNotification,
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.notifications_active),
+                  title: const Text('通知权限'),
+                  subtitle: Text(_notifStatus),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: _requestNotificationPermission,
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.alarm),
+                  title: const Text('精确闹钟（准点推送）'),
+                  subtitle: Text(_alarmStatus),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: _openExactAlarmSettings,
                 ),
               ],
             ),

@@ -259,6 +259,14 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!widget.github.isConfigured) {
       // 未配置 Token，尝试读缓存
       final cached = await widget.storage.getCachedWeeklyPlan();
+      if (cached != null) {
+        // 缓存兜底调度：未配置/断网期间推送也不丢（hub#45）
+        await widget.notifications.scheduleWeeklyNotifications(
+          cached,
+          hour: widget.storage.pushHour,
+          minute: widget.storage.pushMinute,
+        );
+      }
       setState(() {
         _plan = cached;
         _error = cached == null ? '未配置 GitHub 访问，请先到「设置」配置 Token' : null;
@@ -286,6 +294,14 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       // GitHub 拉取失败，用缓存
       final cached = await widget.storage.getCachedWeeklyPlan();
+      if (cached != null) {
+        // 缓存兜底调度：断网期间推送不丢（旧计划总比没提醒好，hub#45）
+        await widget.notifications.scheduleWeeklyNotifications(
+          cached,
+          hour: widget.storage.pushHour,
+          minute: widget.storage.pushMinute,
+        );
+      }
       setState(() {
         _plan = cached;
         _error = '同步失败（${e.toString().substring(0, e.toString().length > 50 ? 50 : e.toString().length)}），显示的是缓存内容';
