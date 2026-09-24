@@ -80,9 +80,11 @@ class GitHubService {
     return files;
   }
 
-  /// 获取最新的周计划（已解析）
+  /// 获取当前应使用的周计划
+  /// 优先取「日期范围覆盖今天」的那份；取不到再回退最新一份。
+  /// 这样「提前生成下周文件」不会串周，「忘记/晚生成」也不会让首页空白。
   Future<WeeklyPlan?> getLatestWeeklyPlan() async {
-    final files = await listWeeklyPlans();
+    final files = await listWeeklyPlans(); // 已按文件名日期降序
     if (files.isEmpty) {
       // 目录为空有两种可能：仓库里确实没有周计划，或 Token 无权访问该私有仓库。
       // Contents API 对「无权限」与「路径不存在」都返回 404（listDirectory 需按空处理），
@@ -95,9 +97,21 @@ class GitHubService {
       return null;
     }
 
-    final latest = files.first;
-    final content = await getFileContent(latest.path);
-    return WeeklyPlan.parse(content, fileName: latest.name);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    WeeklyPlan? newest;
+    for (final f in files) {
+      final content = await getFileContent(f.path);
+      final plan = WeeklyPlan.parse(content, fileName: f.name);
+      if (plan == null) continue;
+      newest ??= plan; // 最新一份作兜底
+      final s = plan.startDate;
+      final e = plan.endDate;
+      if (s != null && e != null && !today.isBefore(s) && !today.isAfter(e)) {
+        return plan; // 命中「覆盖今天」的那一周
+      }
+    }
+    return newest;
   }
 
   /// 获取学习状态文件内容

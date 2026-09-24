@@ -484,6 +484,32 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     final todayTask = _plan!.todayTask;
+    // 当前计划是否覆盖今天：不覆盖说明拿到的不是本周（计划未更新 / 提前生成了别的周）
+    final s = _plan!.startDate;
+    final e = _plan!.endDate;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final coversToday = (s == null || e == null || (!today.isBefore(s) && !today.isAfter(e)));
+    if (!coversToday) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: Column(
+              children: [
+                Icon(Icons.update, size: 48, color: Colors.grey[400]),
+                const SizedBox(height: 8),
+                Text(
+                  '当前显示的是${_plan!.weekLabel}（${_plan!.dateRange}）\n本周计划可能还没更新，点右上角刷新同步',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     if (todayTask == null || !todayTask.hasTasks) {
       return Card(
         child: Padding(
