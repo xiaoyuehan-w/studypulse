@@ -17,19 +17,22 @@ class TodayPage extends StatefulWidget {
 
 class _TodayPageState extends State<TodayPage> {
   Timer? _ticker;
+  /// 秒表节拍：用 ValueNotifier 驱动局部刷新，
+  /// 避免依赖父级 setState（此前出现"停在 16 秒不动、切页才刷新"的问题）
+  final ValueNotifier<int> _tick = ValueNotifier<int>(0);
 
   @override
   void initState() {
     super.initState();
-    // 计时中每秒刷新时长显示
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (widget.services.isRunning && mounted) setState(() {});
+      _tick.value++; // 每秒 +1，界面按需监听
     });
   }
 
   @override
   void dispose() {
     _ticker?.cancel();
+    _tick.dispose();
     super.dispose();
   }
 
@@ -165,7 +168,7 @@ class _TodayPageState extends State<TodayPage> {
           content: e.value,
           done: s.isCompleted(today, e.key),
           running: running != null && running.subject == e.key,
-          runningLabel: running != null && running.subject == e.key ? _elapsed(running) : null,
+          runningLabel: null, // 标签由 _elapsedOf 实时计算，避免闭包捕获旧值
         ),
     ];
   }
@@ -178,6 +181,8 @@ class _TodayPageState extends State<TodayPage> {
     String? runningLabel,
   }) {
     final s = widget.services;
+    final live = s.running;
+    final label = (running && live != null && live.subject == subject) ? _elapsed(live) : runningLabel;
     return Card(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
@@ -198,10 +203,20 @@ class _TodayPageState extends State<TodayPage> {
               ),
             ),
             if (running)
-              TextButton.icon(
-                onPressed: s.stopTimer,
-                icon: const Icon(Icons.stop_circle_outlined, size: 18),
-                label: Text('结束 $runningLabel'),
+              ValueListenableBuilder<int>(
+                valueListenable: _tick,
+                builder: (_, __, ___) {
+                  // 在 builder 内部实时取，确保每秒都是最新值
+                  final live = s.running;
+                  final text = (live != null && live.subject == subject)
+                      ? _elapsed(live)
+                      : (label ?? '');
+                  return TextButton.icon(
+                    onPressed: s.stopTimer,
+                    icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                    label: Text('结束 $text'),
+                  );
+                },
               )
             else
               IconButton(

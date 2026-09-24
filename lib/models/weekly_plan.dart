@@ -69,16 +69,50 @@ class WeeklyPlan {
 
   static const List<String> weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
+  /// 取某天的任务：**先按日期精确匹配**（防止"周三→周二"这类跨周计划错配），
+  /// 再退化为按「周几」匹配（仅当该行没有日期、且本计划覆盖这一天时）
   DailyTask? getTaskForDate(DateTime date) {
-    final wd = weekdays[date.weekday - 1];
     final md = '${date.month}.${date.day}';
+    // ① 日期精确匹配（行里写了日期）
     for (final t in dailyTasks) {
-      if (t.weekday == wd) return t;
+      if (t.date.isNotEmpty && t.date == md) return t;
     }
+    // ② 无日期信息的行：按周几匹配，但必须落在本计划的日期范围内
+    if (!coversDate(date)) return null;
+    final wd = weekdays[date.weekday - 1];
     for (final t in dailyTasks) {
-      if (t.date == md) return t;
+      if (t.date.isEmpty && t.weekday == wd) return t;
     }
     return null;
+  }
+
+  /// 行对应的具体日期（用于完成率/回归统计）；无法解析返回 null
+  DateTime? dateOfTask(DailyTask t) {
+    final m = RegExp(r'^(\d{1,2})\.(\d{1,2})$').firstMatch(t.date.trim());
+    if (m == null) return null;
+    final year = startDate?.year ?? DateTime.now().year;
+    final month = int.parse(m.group(1)!);
+    final day = int.parse(m.group(2)!);
+    var d = DateTime(year, month, day);
+    // 跨年计划（12月→1月）修正
+    final s0 = startDate;
+    if (s0 != null && d.isBefore(s0.subtract(const Duration(days: 3)))) {
+      d = DateTime(year + 1, month, day);
+    }
+    return d;
+  }
+
+  /// 本计划覆盖的日期序列（按行日期；无日期的行用周几+周起点推算）
+  List<DateTime> get coveredDates {
+    final start = startDate;
+    if (start == null) return const [];
+    final out = <DateTime>[];
+    for (final t in dailyTasks) {
+      final d = dateOfTask(t) ??
+          start.add(Duration(days: weekdays.indexOf(t.weekday).clamp(0, 6)));
+      out.add(DateTime(d.year, d.month, d.day));
+    }
+    return out;
   }
 
   DailyTask? get todayTask => getTaskForDate(DateTime.now());

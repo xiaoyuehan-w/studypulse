@@ -53,11 +53,12 @@ CompletionStat completionOf({
 }) {
   if (plan == null) return CompletionStat(done: 0, total: 0);
   final today = now ?? DateTime.now();
-  final start = weekStart(today);
+  final t0 = DateTime(today.year, today.month, today.day);
   var done = 0, total = 0;
-  for (var i = 0; i < 7; i++) {
-    final day = start.add(Duration(days: i));
-    if (day.isAfter(today)) break; // 未来的天不计入
+  // 按计划**实际覆盖的日期**统计（不再假设"周一起算"，也不再只看周几）
+  for (final day in plan.coveredDates) {
+    if (day.isAfter(t0)) break; // 未来不计
+    if (day.isBefore(weekStart(t0))) continue; // 只算本周
     final task = plan.getTaskForDate(day);
     if (task == null) continue;
     for (final e in task.subjects.entries) {
@@ -162,8 +163,7 @@ WeeklyDigest buildDigest({
 
   final pending = <String>[];
   if (plan != null) {
-    for (var i = 0; i < 7; i++) {
-      final day = start.add(Duration(days: i));
+    for (final day in plan.coveredDates) {
       if (day.isAfter(today)) break;
       final task = plan.getTaskForDate(day);
       if (task == null) continue;

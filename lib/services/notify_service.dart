@@ -76,7 +76,7 @@ class NotifyService {
     var id = 1000;
     for (final day in plan.dailyTasks) {
       if (!day.hasTasks) continue;
-      final when = _resolveDateTime(day, hour, minute, now);
+      final when = _resolveDateTime(day, plan, hour, minute, now);
       if (when == null || when.isBefore(now)) continue;
       try {
         await _plugin.zonedSchedule(
@@ -123,20 +123,27 @@ class NotifyService {
     );
   }
 
-  /// 把「周几 + 日期」解析成本周的具体时刻
+  /// 把某天解析成具体时刻：**优先用行里的日期**（跨周/周三起算的计划才不会错配）
   tz.TZDateTime? _resolveDateTime(
     DailyTask day,
+    WeeklyPlan plan,
     int hour,
     int minute,
     tz.TZDateTime now,
   ) {
-    final weekStart = now.subtract(Duration(days: now.weekday - 1));
-    final idx = WeeklyPlan.weekdays.indexOf(day.weekday);
-    if (idx < 0) return null;
-    final base = weekStart.add(Duration(days: idx));
-    final when = tz.TZDateTime(tz.local, base.year, base.month, base.day, hour, minute);
+    final exact = plan.dateOfTask(day);
+    DateTime? base = exact;
+    if (base == null) {
+      final idx = WeeklyPlan.weekdays.indexOf(day.weekday);
+      if (idx < 0) return null;
+      final weekStart = now.subtract(Duration(days: now.weekday - 1));
+      base = weekStart.add(Duration(days: idx));
+    }
+    var when = tz.TZDateTime(tz.local, base.year, base.month, base.day, hour, minute);
     if (when.isBefore(now)) {
-      return when.add(const Duration(days: 7)); // 已过则排到下周同一时刻
+      // 计划内的日期已过 —— 说明这份计划过期了，不再顺延到下同一天
+      if (exact != null) return null;
+      when = when.add(const Duration(days: 7));
     }
     return when;
   }
