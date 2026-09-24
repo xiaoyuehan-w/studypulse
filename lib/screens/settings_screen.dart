@@ -29,6 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _repoController;
   bool _tokenVisible = false;
   bool _validating = false;
+  bool _diagRunning = false;
   String? _validateResult;
   String _batteryStatus = '检查中…';
   String _notifStatus = '检查中…';
@@ -91,6 +92,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _ownerController.dispose();
     _repoController.dispose();
     super.dispose();
+  }
+
+  /// 同步自查：显示每一步的真实 HTTP 状态码
+  Future<void> _runDiagnostics() async {
+    await _saveConfig();
+    if (!mounted) return;
+    setState(() => _diagRunning = true);
+    final lines = await widget.github.runDiagnostics();
+    if (!mounted) return;
+    setState(() => _diagRunning = false);
+    await showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('同步自查结果'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final l in lines) Text(l, style: const TextStyle(fontSize: 13)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 保存 GitHub 配置
@@ -224,6 +256,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 8),
                     Text(_validateResult!, style: const TextStyle(fontSize: 13)),
                   ],
+                  const SizedBox(height: 4),
+                  TextButton.icon(
+                    onPressed: _diagRunning ? null : _runDiagnostics,
+                    icon: const Icon(Icons.health_and_safety_outlined),
+                    label: Text(_diagRunning ? '自查中…' : '同步自查（读不到数据时点这里）'),
+                  ),
                   const SizedBox(height: 8),
                   TextButton.icon(
                     onPressed: () {
@@ -241,6 +279,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               Text('4. Expiration 选：No expiration'),
                               Text('5. 勾选 ☑️ repo'),
                               Text('6. 生成后复制 ghp_ 开头的字符'),
+                              Text(''),
+                              Text('⚠️ 若用 Fine-grained Token：'),
+                              Text('只勾选仓库不够，必须在'),
+                              Text('Repository permissions 里把'),
+                              Text('Contents 设为 Read-only。'),
                             ],
                           ),
                           actions: [

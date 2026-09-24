@@ -119,6 +119,47 @@ class GitHubService {
     }
   }
 
+  /// 同步自查：逐步返回真实 HTTP 状态码，用于排查「保存并验证 ✅ 但读不到数据」。
+  /// 典型场景（fine-grained Token）：仓库元数据可读（200），但 Contents 无读权限（404）。
+  Future<List<String>> runDiagnostics() async {
+    final lines = <String>[];
+    lines.add('仓库：$owner/$repo');
+
+    if (token.isEmpty || owner.isEmpty || repo.isEmpty) {
+      lines.add('Token / 用户名 / 仓库名：有未填写项');
+      return lines;
+    }
+    lines.add('Token：已填写（长度 ${token.length}，不显示内容）');
+
+    Future<void> probe(String label, String url) async {
+      try {
+        final resp = await http.get(Uri.parse(url), headers: _headers);
+        var extra = '';
+        if (resp.statusCode == 200) {
+          try {
+            final data = json.decode(resp.body);
+            if (data is List) {
+              extra = '（条目 ${data.length} 个，其中文件 ${data.where((f) => f['type'] == 'file').length} 个）';
+            }
+          } catch (_) {}
+        }
+        lines.add('$label：HTTP ${resp.statusCode}$extra');
+      } catch (e) {
+        lines.add('$label：请求异常（$e）');
+      }
+    }
+
+    await probe('① 仓库元数据', '$_baseUrl/repos/$owner/$repo');
+    await probe('② 周计划目录', '$_baseUrl/repos/$owner/$repo/contents/10 项目/考研科软/周计划');
+    await probe('③ 学习状态文件', '$_baseUrl/repos/$owner/$repo/contents/10 项目/考研科软/学习状态-共同.md');
+
+    lines.add('——');
+    lines.add('判读：①=200 而 ②③=404 → Token 缺「读文件」权限：'
+        'fine-grained 需把 Contents 设为 Read-only（只授权仓库不够）；classic 需勾选 repo。');
+    lines.add('②③=200 则 Token 正常，空白原因在网络或缓存。');
+    return lines;
+  }
+
   /// 从文件名提取日期用于排序
   /// 文件名格式：周计划-第1周-2026.9.23.md
   static DateTime _extractDateFromFileName(String name) {
